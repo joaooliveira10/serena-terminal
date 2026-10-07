@@ -1,0 +1,20 @@
+# Build output
+/sereno
+/sereno.exe
+/dist/
+
+# Throw-away local trial (docs/spec-0.1.md, test T11)
+/spike.ps1
+/spike-result.txt
+
+# Local files that must never reach the repository
+.env
+.env.*
+!.env.example
+*.log
+*.pem
+*.key
+.DS_Store
+Thumbs.db
+.claude/
+.vscode/*
