@@ -1,0 +1,35 @@
+// Generated fixture. Not a real theme: only the keys the importer reads, plus noise.
+{
+  "$schema": "vscode://schemas/color-theme",
+  "name": "Serena Light Vivid",
+  "type": "light",
+  "semanticHighlighting": true,
+  "colors": {
+    "foreground": "#ABCDEF",
+    "editor.background": "#010203",
+    "editor.selectionBackground": "#d3d3ff",
+    "terminal.background": "#f3f3f3",
+    "terminal.foreground": "#232323",
+    "terminalCursor.foreground": "#434343",
+    "terminal.ansiBlack": "#a40000",
+    "terminal.ansiRed": "#a41111",
+    "terminal.ansiGreen": "#a42222",
+    "terminal.ansiYellow": "#a43333",
+    "terminal.ansiBlue": "#a44444",
+    "terminal.ansiMagenta": "#a45555",
+    "terminal.ansiCyan": "#a46666",
+    "terminal.ansiWhite": "#a47777",
+    "terminal.ansiBrightBlack": "#a48888",
+    "terminal.ansiBrightRed": "#a49999",
+    "terminal.ansiBrightGreen": "#a4aaaa",
+    "terminal.ansiBrightYellow": "#a4bbbb",
+    "terminal.ansiBrightBlue": "#a4cccc",
+    "terminal.ansiBrightMagenta": "#a4dddd",
+    "terminal.ansiBrightCyan": "#a4eeee",
+    "terminal.ansiBrightWhite": "#a4ffff",
+    "terminal.findMatchBorder": "#11223344"
+  },
+  "tokenColors": [
+    { "name": "// not a comment line", "scope": "comment", "settings": { "foreground": "#777777" } }
+  ]
+}

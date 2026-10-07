@@ -1,0 +1,2 @@
+# bashrc kept in a dotfiles folder and linked into the home
+export EDITOR=vi

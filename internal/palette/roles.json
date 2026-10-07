@@ -1,0 +1,21 @@
+{
+  "function": "34",
+  "keyword": "35",
+  "string": "32",
+  "type": "33",
+  "property": "36",
+  "constant": "93",
+  "parameter": "3;37",
+  "operator": "37",
+  "variable": "39",
+  "default": "39",
+  "comment": "90",
+  "error": "91",
+  "emphasis": "96",
+  "selection": "7",
+  "prompt.path": "34",
+  "prompt.branch": "35",
+  "prompt.ok": "32",
+  "prompt.failed": "31",
+  "prompt.meta": "90"
+}

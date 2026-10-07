@@ -1,0 +1,37 @@
+// Generated fixture. Not a real theme: only the keys the importer reads, plus noise.
+{
+  "$schema": "vscode://schemas/color-theme",
+  "name": "Serena High Contrast",
+  "type": "hc",
+  "semanticHighlighting": true,
+  "colors": {
+    "foreground": "#ABCDEF",
+    "editor.background": "#010203",
+    "editor.selectionBackground": "#999999",
+    "terminal.background": "#000000",
+    "terminal.foreground": "#ffffff",
+    "terminalCursor.foreground": "#fefefe",
+    "terminal.ansiBlack": "#a50000",
+    "terminal.ansiRed": "#a51111",
+    "terminal.ansiGreen": "#a52222",
+    "terminal.ansiYellow": "#a53333",
+    "terminal.ansiBlue": "#a54444",
+    "terminal.ansiMagenta": "#a55555",
+    "terminal.ansiCyan": "#a56666",
+    "terminal.ansiWhite": "#a57777",
+    "terminal.ansiBrightBlack": "#a58888",
+    "terminal.ansiBrightRed": "#a59999",
+    "terminal.ansiBrightGreen": "#a5aaaa",
+    "terminal.ansiBrightYellow": "#a5bbbb",
+    "terminal.ansiBrightBlue": "#a5cccc",
+    "terminal.ansiBrightMagenta": "#a5dddd",
+    "terminal.ansiBrightCyan": "#a5eeee",
+    "terminal.ansiBrightWhite": "#a5ffff",
+    "terminal.selectionBackground": "#CCBBFF",
+    "terminal.selectionForeground": "#050505",
+    "terminal.findMatchBorder": "#11223344"
+  },
+  "tokenColors": [
+    { "name": "// not a comment line", "scope": "comment", "settings": { "foreground": "#777777" } }
+  ]
+}
