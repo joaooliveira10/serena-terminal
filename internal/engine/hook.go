@@ -2,7 +2,6 @@ package engine
 
 import (
 	"bytes"
-	"errors"
 	"io/fs"
 	"os"
 	"strings"
@@ -239,13 +238,7 @@ func classify(data []byte) (textKind, string) {
 
 // cause returns the system's own words for an I/O error, without the path
 // that sereno prints itself.
-func cause(err error) string {
-	var pathErr *fs.PathError
-	if errors.As(err, &pathErr) {
-		return pathErr.Err.Error()
-	}
-	return err.Error()
-}
+func cause(err error) string { return plain(err).Error() }
 
 // hookAction says what has to happen to a profile.
 type hookAction int

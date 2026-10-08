@@ -91,15 +91,79 @@ type builder struct {
 // there. On Windows, where file names ignore letter case, the same folder
 // named in another case is therefore the same installation and not a foreign
 // file in the way.
+//
+// The error is ErrBusy when another sereno is writing the folder, or has
+// written it since the caller read the manifest it passes in the request.
 func PlanApply(req Request) (*Plan, error) {
 	if err := req.validate(); err != nil {
 		return nil, err
 	}
-	old, _, err := LoadManifest(req.Root)
+	return confirmed(req.Root, func(made []string) (*Plan, error) { return planApply(req, made) })
+}
+
+// confirmed makes a plan with the function it is given and keeps the function
+// in the plan, so that the plan can be made again under the lock (see
+// Plan.ApplyContext).
+//
+// A plan is a picture of the folder, and a picture taken while another sereno
+// writes the folder shows things that are not so: a file without its record,
+// a record without its file. When another command holds the lock at the end
+// of planning, the answer is therefore ErrBusy and no plan.
+//
+// The other command may also have finished a moment before. A plan that
+// refuses, that leaves something in place, or that could not be made because
+// a file could not be read, says something about the user's files, and each
+// of the three is what such a picture looks like. Before anybody is told,
+// such a plan is made a second time; when the two do not agree, the answer
+// is ErrBusy and not a tale about the user's files.
+func confirmed(root string, again func(made []string) (*Plan, error)) (*Plan, error) {
+	plan, err := again(nil)
+	if errors.Is(err, ErrBusy) || Busy(root) {
+		return nil, ErrBusy
+	}
+	if err == nil && !plan.Refused() && plan.Incomplete() == 0 {
+		plan.again = again
+		return plan, nil
+	}
+	second, secondErr := again(nil)
+	switch {
+	case errors.Is(secondErr, ErrBusy), (err == nil) != (secondErr == nil):
+		return nil, ErrBusy
+	case err != nil:
+		return nil, err
+	}
+	if _, differs := plan.differs(second, 0); differs || plan.manifest != second.manifest {
+		return nil, ErrBusy
+	}
+	second.again = again
+	return second, nil
+}
+
+// planApply is PlanApply for a request that has been validated. made lists
+// the directories the run has created already, on its way to the lock (see
+// Plan.begin): they are recorded like directories that are still to be
+// created, and need no operation any more.
+func planApply(req Request, made []string) (*Plan, error) {
+	current, state, err := readManifestFile(req.Root)
 	if err != nil {
 		return nil, err
 	}
+	old := req.Manifest
+	switch {
+	case old == nil || !old.origin.known:
+		if old, err = manifestFrom(current, state); err != nil {
+			return nil, err
+		}
+	case old.origin != state:
+		// The caller built the request on a manifest that is no longer the
+		// one on disk.
+		return nil, ErrBusy
+	}
 	b := &builder{root: req.Root, old: old, next: old.clone(), planned: map[string]bool{}}
+	for _, dir := range made {
+		b.planned[pathKey(dir)] = true
+		b.next.addDir(dir)
+	}
 	b.next.Version = req.Version
 	if req.Options != nil {
 		b.next.Options = Options{Hooks: append([]string{}, req.Options.Hooks...), Profile: req.Options.Profile, Shell: req.Options.Shell}
@@ -108,6 +172,10 @@ func PlanApply(req Request) (*Plan, error) {
 
 	manifestPath := filepath.Join(req.Root, ManifestName)
 	b.needDirs(manifestPath, b.ownedDir)
+	if lockInTheWay(req.Root) {
+		// Phase 2 could not take the lock: better said now than then.
+		b.refuse(filepath.Join(req.Root, LockName), NewNote(ReasonForeign))
+	}
 	recorded := map[string]string{}
 	for path := range old.Owned {
 		recorded[pathKey(path)] = path
@@ -123,19 +191,34 @@ func PlanApply(req Request) (*Plan, error) {
 	for _, h := range req.Hooks {
 		b.hook(h)
 	}
-	manifestOp, book, err := b.manifest(manifestPath)
+	manifestOp, book, err := b.manifest(manifestPath, current, state)
 	if err != nil {
 		return nil, err
 	}
 
-	plan := &Plan{Root: req.Root, Refusals: b.refusals, ledger: book}
+	plan := &Plan{Root: req.Root, Refusals: b.refusals, ledger: book, manifest: state}
 	plan.Ops = append(plan.Ops, b.mkdirs...)
 	plan.Ops = append(plan.Ops, b.backups...)
 	book.index = len(plan.Ops)
 	plan.Ops = append(plan.Ops, manifestOp)
 	plan.Ops = append(plan.Ops, b.files...)
 	plan.Ops = append(plan.Ops, b.hooks...)
+	if err := stillAt(req.Root, state); err != nil {
+		return nil, err
+	}
 	return plan, nil
+}
+
+// stillAt ends the making of a plan: it returns ErrBusy when the manifest
+// file is no longer in the state the plan was started from. Whoever writes
+// the manifest writes it before the files it lists and deletes it after
+// them, so a manifest that changed while a plan was being made means that
+// the files were looked at while they were being written.
+func stillAt(root string, state fileState) error {
+	if _, now, err := readManifestFile(root); err != nil || now != state {
+		return ErrBusy
+	}
+	return nil
 }
 
 func (b *builder) refuse(path string, reason Note) {
@@ -227,6 +310,11 @@ func (b *builder) file(f File) error {
 			b.files = append(b.files, Op{Verb: VerbSkip, Path: f.Path, Note: NewNote(NoteEdited), Incomplete: true})
 		case current == sum:
 			b.files = append(b.files, Op{Verb: VerbKeep, Path: f.Path, Note: NewNote(NoteKept)})
+		case info.Mode().Perm()&0o200 == 0:
+			// The user has marked the file read-only since sereno wrote it.
+			// That is a wish, and on Windows also a fact: the file cannot be
+			// replaced. It is left as a profile in that state is (R22).
+			b.files = append(b.files, Op{Verb: VerbSkip, Path: f.Path, Note: NewNote(NoteReadOnly), Incomplete: true})
 		default:
 			b.files = append(b.files, Op{Verb: VerbReplace, Path: f.Path, act: writeOver(f.Data, FilePerm, current), undo: record()})
 		}
@@ -370,8 +458,9 @@ func (b *builder) backup(record *HookRecord, p profile, hashBefore string) bool 
 }
 
 // manifest plans the write of the manifest itself and collects what Apply
-// needs to correct it if a later operation fails.
-func (b *builder) manifest(path string) (Op, *ledger, error) {
+// needs to correct it if a later operation fails. current and state are the
+// manifest file as planning read it, once, at its start.
+func (b *builder) manifest(path string, current []byte, state fileState) (Op, *ledger, error) {
 	// Every recorded hook is also a recorded option, whatever the caller
 	// passed: the next apply must keep it (R13).
 	for _, record := range b.next.Hooks {
@@ -382,19 +471,15 @@ func (b *builder) manifest(path string) (Op, *ledger, error) {
 		return Op{}, nil, err
 	}
 	book := &ledger{path: path, old: b.old, next: b.next, data: data}
-	current, err := os.ReadFile(path)
-	switch {
-	case isMissing(err):
+	if state.absent {
 		book.before = action{absent: true}
 		return Op{Verb: VerbCreate, Path: path, act: writeNew(data, FilePerm)}, book, nil
-	case err != nil:
-		return Op{}, nil, fmt.Errorf("read manifest: %w", err)
 	}
-	book.before = action{sum: SHA256(current)}
+	book.before = action{sum: state.sum}
 	if bytes.Equal(current, data) {
 		return Op{Verb: VerbKeep, Path: path, Note: NewNote(NoteKept)}, book, nil
 	}
-	return Op{Verb: VerbReplace, Path: path, act: writeOver(data, FilePerm, SHA256(current))}, book, nil
+	return Op{Verb: VerbReplace, Path: path, act: writeOver(data, FilePerm, state.sum)}, book, nil
 }
 
 // PlanUntracked plans files that are written outside the manifest, which is

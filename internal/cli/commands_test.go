@@ -118,7 +118,7 @@ func TestCheckFails(t *testing.T) {
 			": FAIL\n",
 			"  dark: ansi[3] on background is 1.00:1, under the floor of 4.5\n",
 			"  role error uses SGR 41: SGR parameter 41 is not allowed\n",
-			"2 value(s) under the floor or not allowed.\n",
+			"Under the floor or not allowed: 2.\n",
 		} {
 			if !strings.Contains(out.String(), wanted) {
 				t.Errorf("check does not print %q:\n%s", wanted, out.String())
@@ -402,6 +402,10 @@ func TestThemeAndAnEditedModeFile(t *testing.T) {
 	got := w.must(engine.ExitIncomplete, "theme", "light")
 	if w.read(w.modeFile()) != edited {
 		t.Error("an edited mode file was overwritten")
+	}
+	// The fragment follows the file, not the setting that was not stored.
+	if w.read(w.fragment()) != golden(t, "fragment/dark-soft.json") {
+		t.Error("the fragment says something else than the mode file")
 	}
 	if !strings.Contains(got.out, "  skip    "+w.modeFile()+" (") || !regexp.MustCompile(`(?m)^mode +dark$`).MatchString(got.out) {
 		t.Errorf("the edited mode file is not reported as left alone, or the report does not show what it says:\n%s", got.out)
@@ -1362,7 +1366,9 @@ func TestApplyWritesTheRenderedFiles(t *testing.T) {
 // TestUninstallSaysWhatRemains is the last sentence of R39: what uninstall
 // does not take back is said, and only where it applies. The entry Windows
 // Terminal wrote for the profile is mentioned when Windows Terminal has seen
-// the profile, or when that cannot be found out.
+// the profile, or when that cannot be found out. What sereno's own fragment
+// holds at the moment does not matter: the entry outlives a profile that an
+// apply with --no-profile took out again (see TestUninstallAfterNoProfile).
 func TestUninstallSaysWhatRemains(t *testing.T) {
 	guid := winterminal.ProfileGUID()
 	localState := func(w *world) string {
@@ -1386,9 +1392,10 @@ func TestUninstallSaysWhatRemains(t *testing.T) {
 		{"settings.json cannot be read", platform.Windows, "wt-present", []string{"apply"}, func(w *world) {
 			w.write(filepath.Join(localState(w), "settings.json"), `{{`)
 		}, true},
-		{"schemes only", platform.Windows, "wt-present", []string{"apply", "--no-profile"}, func(w *world) {
+		{"schemes only, and Windows Terminal never saw a profile", platform.Windows, "wt-present", []string{"apply", "--no-profile"}, nil, false},
+		{"schemes only, and Windows Terminal knows the profile from before", platform.Windows, "wt-present", []string{"apply", "--no-profile"}, func(w *world) {
 			w.write(filepath.Join(localState(w), "state.json"), `{"generatedProfiles": ["`+guid+`"]}`)
-		}, false},
+		}, true},
 		{"no Windows Terminal", platform.Windows, "", []string{"apply"}, nil, false},
 		{"Linux", platform.Linux, "wt-present", []string{"apply"}, nil, false},
 	}

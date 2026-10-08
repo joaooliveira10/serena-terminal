@@ -253,20 +253,18 @@ func (r *run) parse(cmd *command, args []string) (parsed, string) {
 	return p, ""
 }
 
-// checkValue compares the value of a flag with the values it allows.
+// checkValue compares the value of a flag with the values it allows. An
+// empty value, or an empty place in a list, is a value that is missing.
 func (r *run) checkValue(spec *flagSpec, value string) string {
-	if spec.values == nil {
-		if value == "" {
-			return r.T("usage.needs-value", "--"+spec.name, spec.arg)
-		}
-		return ""
-	}
 	items := []string{value}
 	if spec.list {
 		items = strings.Split(value, ",")
 	}
 	for _, item := range items {
-		if !contains(spec.values, item) {
+		switch {
+		case item == "":
+			return r.T("usage.needs-value", "--"+spec.name, spec.arg)
+		case spec.values != nil && !contains(spec.values, item):
 			return r.T("usage.bad-value", item, "--"+spec.name, strings.Join(spec.values, ", "))
 		}
 	}

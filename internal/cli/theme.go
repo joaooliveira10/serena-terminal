@@ -68,15 +68,16 @@ func runTheme(r *run, p parsed) int {
 		if value, given := p.value("inband"); given {
 			settings.InBand = mode.Scope(value)
 		}
-		var written bool
-		if code, written = r.storeSettings(s, pal, settings); code == engine.ExitFailure || code == engine.ExitRefused {
+		var stored bool
+		if code, stored = r.storeSettings(s, pal, settings); code == engine.ExitFailure || code == engine.ExitRefused {
 			return code
 		}
-		if code == engine.ExitIncomplete {
-			// An edited mode file was left as it is: what counts is what it says.
+		if !stored {
+			// The mode file is as it was (it holds the setting already,
+			// or the user edited it and it was left alone): what counts
+			// is what it says.
 			settings = readSettings(s.modePath)
-		}
-		if written && r.env.Host.IsWindows() {
+		} else if r.env.Host.IsWindows() {
 			r.say(r.T("theme.changed"))
 		}
 	}
@@ -103,9 +104,16 @@ func runTheme(r *run, p parsed) int {
 // profile is installed, the fragment with its colorScheme rendered again
 // (R35). Everything else sereno owns stays as it is. The result is an exit
 // code: 0, or 4 when a file the user edited was left alone; 1 and 3 after
-// their messages. written says whether a file changed.
-func (r *run) storeSettings(s *site, pal *palette.Palette, settings mode.Settings) (code int, written bool) {
-	req := engine.Request{Root: s.root.Path, Version: r.env.Version}
+// their messages. stored says whether the mode file was written, that is,
+// whether there is a new setting.
+//
+// The fragment follows the mode file, never the command line. When the mode
+// file is left as it is, because the user edited it or marked it read-only,
+// the setting that was asked for is not stored, and the fragment is rendered
+// from what the file says: that is what the shells go by and what the next
+// apply renders.
+func (r *run) storeSettings(s *site, pal *palette.Palette, settings mode.Settings) (code int, stored bool) {
+	req := engine.Request{Root: s.root.Path, Version: r.env.Version, Manifest: s.manifest}
 	req.Files = append(req.Files, engine.File{Path: s.modePath, Data: settings.Bytes()})
 
 	// Without a place to look for Windows Terminal there is no fragment to
@@ -114,18 +122,29 @@ func (r *run) storeSettings(s *site, pal *palette.Palette, settings mode.Setting
 	if err != nil {
 		onWindows = false
 	}
-	if onWindows && s.manifest.Options.Profile {
-		if recorded, owned := r.owns(s.manifest, terminal.fragmentPath); owned {
-			options := render.FragmentOptions{Profile: true, Shell: r.installedShell(s, pal, recorded), Mode: settings.Mode, Flavor: settings.Flavor, Root: s.root}
-			data, refusal, err := r.renderFragment(pal, options)
-			switch {
-			case err != nil:
-				return r.failure(err), false
-			case refusal != nil:
-				return r.printRefusals([]engine.Refusal{*refusal}), false
-			}
-			req.Files = append(req.Files, engine.File{Path: recorded, Data: data})
+	if recorded, owned := r.owns(s.manifest, terminal.fragmentPath); onWindows && owned && r.profileInstalled(s, recorded) {
+		// What will the plan do with the mode file? A plan for that file
+		// alone answers with the rules the real one goes by.
+		alone, err := engine.PlanApply(req)
+		if err != nil {
+			return r.failure(err), false
 		}
+		if alone.Refused() {
+			return r.printRefusals(alone.Refusals), false
+		}
+		inFile := settings
+		if alone.Incomplete() > 0 {
+			inFile = readSettings(s.modePath)
+		}
+		options := render.FragmentOptions{Profile: true, Shell: r.installedShell(s, pal, recorded), Mode: inFile.Mode, Flavor: inFile.Flavor, Root: s.root}
+		data, refusal, err := r.renderFragment(pal, options)
+		switch {
+		case err != nil:
+			return r.failure(err), false
+		case refusal != nil:
+			return r.printRefusals([]engine.Refusal{*refusal}), false
+		}
+		req.Files = append(req.Files, engine.File{Path: recorded, Data: data})
 	}
 
 	plan, err := engine.PlanApply(req)
@@ -144,7 +163,7 @@ func (r *run) storeSettings(s *site, pal *palette.Palette, settings mode.Setting
 		if op.Verb == engine.VerbKeep || r.samePath(op.Path, filepath.Join(s.root.Path, engine.ManifestName)) {
 			continue
 		}
-		written = written || op.Changes()
+		stored = stored || (op.Changes() && r.samePath(op.Path, s.modePath))
 		for _, line := range op.Lines(r.catalog.T) {
 			r.say(line)
 		}
@@ -152,7 +171,7 @@ func (r *run) storeSettings(s *site, pal *palette.Palette, settings mode.Setting
 	if plan.Incomplete() > 0 {
 		r.say(r.T("plan.incomplete"))
 	}
-	return plan.ExitCode(), written
+	return plan.ExitCode(), stored
 }
 
 // installedShell finds out which PowerShell the installed Serena profile
@@ -310,10 +329,21 @@ func (r *run) show(variant palette.Variant) {
 		r.say("  " + r.T("show.contrast.slots", ratio(report.Minimum), fmt.Sprint(report.MinimumSlot), floor(report.Floor)))
 		for _, m := range report.Measurements {
 			if m.Rule == palette.RuleForeground || m.Rule == palette.RuleCursor || m.Rule == palette.RuleSelection {
-				r.say("  " + r.T("show.contrast.pair", m.Subject, m.Against, ratio(m.Ratio), floor(m.Floor)))
+				r.say("  " + r.T("show.contrast.pair", r.subject(m.Subject), m.Against, ratio(m.Ratio), floor(m.Floor)))
 			}
 		}
 	}
+}
+
+// subject names what a measurement of the contrast gate is about. The names
+// are those of the palette file, which are not translated; the one that is
+// not a colour of the palette, the better of black and white on the selection
+// (R9), is said in words.
+func (r *run) subject(name string) string {
+	if name == palette.SubjectBlackOrWhite {
+		return r.T("show.contrast.black-or-white")
+	}
+	return name
 }
 
 // ratio and floor print contrast figures the way docs/contrast.md does.

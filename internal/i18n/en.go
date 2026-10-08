@@ -4,17 +4,19 @@ package i18n
 // (ptbr.go) with the same arguments; i18n_test.go enforces both.
 var english = map[string]string{
 	// Plan output (R13, R14). The verbs themselves are not translated.
-	"plan.nothing-changed":    "Nothing was changed.",
-	"plan.note.kept":          "already as wanted",
-	"plan.note.edited":        "edited after sereno wrote it; left as it is",
-	"plan.note.not-regular":   "no longer a regular file; left as it is",
-	"plan.note.backup-of":     "copy of %s from before the hook line",
-	"plan.note.backup-kept":   "%s changed after the hook line was added, so its backup stays",
-	"plan.note.hook-present":  "the hook line is already there",
-	"plan.note.hook-replaces": "replaces the sereno line that is there",
-	"plan.note.hook-removed":  "hook line removed",
-	"plan.note.hook-restored": "back to its content from before the hook line",
-	"plan.note.bash-profile":  "Git for Windows will create ~/.bash_profile by itself",
+	"plan.nothing-changed":       "Nothing was changed.",
+	"plan.note.kept":             "already as wanted",
+	"plan.note.edited":           "edited after sereno wrote it; left as it is",
+	"plan.note.read-only":        "is read-only; left as it is",
+	"plan.note.not-regular":      "no longer a regular file; left as it is",
+	"plan.note.backup-of":        "copy of %s from before the hook line",
+	"plan.note.backup-kept":      "%s changed after the hook line was added, so its backup stays",
+	"plan.note.backup-kept-line": "the hook line is still in %s, so its backup stays",
+	"plan.note.hook-present":     "the hook line is already there",
+	"plan.note.hook-replaces":    "replaces the sereno line that is there",
+	"plan.note.hook-removed":     "hook line removed",
+	"plan.note.hook-restored":    "back to its content from before the hook line",
+	"plan.note.bash-profile":     "Git for Windows will create ~/.bash_profile by itself",
 
 	// Refusals (R4 exit 3, R15, R20, R22). Each follows the path it is about.
 	"refusal.foreign":            "exists and was not written by sereno",
@@ -45,13 +47,16 @@ var english = map[string]string{
 	"wt.notice.open": "Open a new Windows Terminal window and choose Serena in the new-tab menu. If it is not listed, close every Windows Terminal window and open it again.",
 
 	// Plan output of the commands (R13, R14).
-	"plan.summary":        "Total: %s.",
-	"plan.summary.empty":  "Total: nothing to do.",
-	"plan.dry-run":        "This was a dry run. Run the same command without --dry-run to carry it out.",
-	"plan.nothing-to-do":  "Nothing to do: no file was written.",
-	"plan.done":           "Done.",
-	"plan.incomplete":     "Something was left as it is: see the skip lines above. sereno does not overwrite, edit or delete a file in that state. Once you have dealt with it yourself, run the command again.",
-	"plan.note.wt-absent": "Windows Terminal was not found, so its fragment is not written",
+	"plan.summary":       "Total: %s.",
+	"plan.summary.empty": "Total: nothing to do.",
+	"plan.dry-run":       "This was a dry run. Run the same command without --dry-run to carry it out.",
+	"plan.nothing-to-do": "Nothing to do: no file was written.",
+	"plan.done":          "Done.",
+	"plan.incomplete":    "Something was left as it is: see the skip lines above. sereno does not overwrite, edit or delete a file in that state. Once you have dealt with it yourself, run the command again.",
+	// After an uninstall the manifest is gone: there is no "again".
+	"plan.incomplete.uninstall":         "Something was left as it is: see the skip lines above. sereno did not edit or delete it, and it is no longer recorded: remove it yourself (a hook line is the one shown after `-`).",
+	"plan.incomplete.uninstall.dry-run": "Something would be left as it is: see the skip lines above. sereno does not edit or delete it, and after the uninstall it is not recorded any more: you would have to remove it yourself (a hook line is the one shown after `-`).",
+	"plan.note.wt-absent":               "Windows Terminal was not found, so its fragment is not written",
 
 	// Refusals of the commands, and the way out of those of the engine.
 	"refusal.header":               "refused, and nothing was changed:",
@@ -86,11 +91,19 @@ var english = map[string]string{
 	"error.root":          "cannot tell where sereno's folder is: %s",
 	"error.manifest":      "the manifest %[1]s cannot be read: %[2]s",
 	"error.manifest.next": "Without it sereno cannot tell which files are its own, so it changes nothing. Restore the file; or, to start over, delete sereno's folder and any line ending in `# sereno:hook` by hand.",
-	"error.hook":          "cannot find the start-up file of %[1]s: %[2]s",
-	"error.sandbox":       "stopped before writing %[1]s: it is outside %[2]s=%[3]s",
-	"error.interrupted":   "interrupted",
-	"error.write":         "stopped: %s",
-	"error.write.next":    "What was written before this point is recorded, so nothing is lost track of: run the command again to finish, or `sereno uninstall` to take it back.",
+	// The manifest has a format number above the one this version reads.
+	"error.manifest.newer": "This folder was written by a newer sereno. Use that version, also to uninstall.",
+	"error.hook":           "cannot find the start-up file of %[1]s: %[2]s",
+	"error.sandbox":        "stopped before writing %[1]s: it is outside %[2]s=%[3]s",
+	// The check itself failed, for example at a link or a junction on the way.
+	"error.sandbox.unchecked": "stopped before writing %[1]s: whether it is inside %[2]s=%[3]s could not be checked (%[4]s)",
+	"error.interrupted":       "interrupted",
+	// Two commands at the same time: this one made way and wrote nothing.
+	"error.busy":       "another sereno is working on this folder; run the command again when it has finished",
+	"error.write":      "stopped: %s",
+	"error.write.next": "What was written before this point is recorded, so nothing is lost track of: run the command again to finish, or `sereno uninstall` to take it back.",
+	// For files written with `export --to`, which sereno keeps no record of.
+	"error.write.next.untracked": "Files written before this point stay in the folder you named; sereno keeps no record of them. Run the command again to finish, or delete them yourself.",
 
 	// After an apply.
 	"apply.note.schemes-only": "The six Serena colour schemes are now offered to Windows Terminal (Settings > Color schemes); no profile was added.",
@@ -120,7 +133,7 @@ var english = map[string]string{
 	"theme.paint.multiplexer.next":  "Run the command outside tmux or screen.",
 	"theme.paint.done":              "This terminal now shows %s. Nothing was written to disk; `sereno theme --reset` hands the terminal its own colours back.",
 	"theme.reset.done":              "The terminal was asked to go back to its own colours.",
-	"theme.changed":                 "Sessions in Windows Terminal read the new setting at their next prompt; other sessions when they start.",
+	"theme.changed":                 "Sessions that follow the system read the new setting at their next prompt; all others when they start.",
 
 	// Words and labels of the reports of theme and status. The five settings
 	// keep their names from the mode file and are not here.
@@ -150,8 +163,8 @@ var english = map[string]string{
 
 	// status (R37).
 	"status.applied.no":          "no (`sereno apply --dry-run` shows what it would write)",
-	"status.session":             "%[1]s, started from the Serena profile: %[2]s",
-	"status.session.other":       "neither Windows Terminal nor VS Code",
+	"status.session":             "%[1]s; started from the Serena profile: %[2]s",
+	"status.session.other":       "other terminal (not Windows Terminal, not VS Code)",
 	"status.wt.detected":         "detected",
 	"status.wt.absent":           "not found",
 	"status.wt.fragment.profile": "sereno's fragment is installed, with the Serena profile",
@@ -174,7 +187,7 @@ var english = map[string]string{
 	"wt.defaults-override":    "Windows Terminal's settings.json sets %s in profiles.defaults, which wins over what the Serena profile asks for.",
 	"wt.profile-suppressed":   "Windows Terminal has seen the Serena profile before and its entry is gone from settings.json, so it keeps the profile hidden. To show it again, add this object to profiles.list in %[1]s: %[2]s",
 	"wt.settings-unreadable":  "%[1]s could not be read as JSON (%[2]s); what depends on it is not reported.",
-	"owned.modified":          "Edited since sereno wrote them: %s. apply and uninstall leave such a file as it is; delete it to let sereno write it again.",
+	"owned.modified":          "Edited since sereno wrote them: %s. apply leaves such a file as it is and so does uninstall, except the mode file, which uninstall always deletes; delete a file to let sereno write it again.",
 	"owned.missing":           "Written by sereno and gone: %s. `sereno apply` writes them again.",
 	"hook.missing":            "The hook line for %[1]s is no longer in %[2]s. `sereno apply` adds it again; `sereno uninstall --hook %[1]s` forgets it.",
 	"hook.missing.unreadable": "The hook line for %[1]s cannot be looked for: %[2]s %[3]s.",
@@ -189,12 +202,15 @@ var english = map[string]string{
 	"check.failure":       "%[1]s: %[2]s on %[3]s is %[4]s:1, under the floor of %[5]s",
 	"check.role":          "role %[1]s uses SGR %[2]s: %[3]s",
 	"check.all-pass":      "Every value is at or above its floor.",
-	"check.some-fail":     "%v value(s) under the floor or not allowed.",
+	"check.some-fail":     "Under the floor or not allowed: %v.",
 	"show.slots":          "The sixteen slots, with the values of %s",
 	"show.roles":          "Roles (name, SGR parameters, sample)",
 	"show.contrast":       "Contrast (WCAG ratio to 1)",
 	"show.contrast.slots": "slots 1-15 on the background: minimum %[1]s at slot %[2]s (floor %[3]s)",
 	"show.contrast.pair":  "%[1]s on %[2]s: %[3]s (floor %[4]s)",
+	// What stands for the better of the two colours Windows Terminal draws
+	// selected text in.
+	"show.contrast.black-or-white": "black or white text",
 
 	// export (R38).
 	"export.not-applied":      "sereno has not been applied here, and `sereno export` writes into its folder (%s) unless you name another",

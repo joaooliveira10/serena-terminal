@@ -130,7 +130,10 @@ func Run(env Env, args []string) int {
 	// The language flag is checked after the language is chosen, so that the
 	// complaint about it is at least in the language of the system.
 	if global.langGiven {
-		if _, ok := i18n.Parse(global.lang); !ok {
+		switch _, ok := i18n.Parse(global.lang); {
+		case global.lang == "":
+			return r.usageError(nil, r.T("usage.needs-value", "--lang", "en|pt-BR"))
+		case !ok:
 			return r.usageError(nil, r.T("usage.bad-value", global.lang, "--lang", "en, pt-BR"))
 		}
 	}

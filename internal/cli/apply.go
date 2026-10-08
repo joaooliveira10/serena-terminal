@@ -64,7 +64,7 @@ func runApply(r *run, p parsed) int {
 	if err != nil {
 		return r.failure(err)
 	}
-	req := engine.Request{Root: s.root.Path, Version: r.env.Version, Options: &options}
+	req := engine.Request{Root: s.root.Path, Version: r.env.Version, Options: &options, Manifest: s.manifest}
 
 	// Owned files, in the order they are written: the shell files first, the
 	// fragment last, so that Windows Terminal never sees a profile whose
@@ -162,14 +162,14 @@ func runApply(r *run, p parsed) int {
 			// will write to its own settings once it sees the profile.
 			r.say(r.T("wt.notice.stub"))
 		}
-		r.closePlan(plan, true)
+		r.closePlan(plan, true, r.T("plan.incomplete"))
 		return plan.ExitCode()
 	}
 	code := r.carryOut(plan)
 	if code == engine.ExitFailure {
 		return code
 	}
-	r.closePlan(plan, false)
+	r.closePlan(plan, false, r.T("plan.incomplete"))
 	r.applyNotices(facts)
 	return code
 }

@@ -96,10 +96,12 @@ func (r *run) printPlan(plan *engine.Plan) {
 
 // closePlan prints what follows a plan: for a dry run the sentence R13 fixes,
 // otherwise whether anything was done, and in both cases what the user can do
-// about lines that report something left in place (exit code 4).
-func (r *run) closePlan(plan *engine.Plan, dryRun bool) {
+// about lines that report something left in place (exit code 4). left is that
+// sentence; it depends on the command, because after an uninstall there is no
+// record left to go on from.
+func (r *run) closePlan(plan *engine.Plan, dryRun bool, left string) {
 	if plan.Incomplete() > 0 {
-		r.say(r.T("plan.incomplete"))
+		r.say(left)
 	}
 	switch {
 	case dryRun && plan.Changes() > 0:
@@ -119,17 +121,24 @@ func (r *run) closePlan(plan *engine.Plan, dryRun bool) {
 // code is that of the plan: 4 when something was left in place, otherwise 0.
 func (r *run) carryOut(plan *engine.Plan) int {
 	if err := plan.ApplyContext(r.env.Context); err != nil {
-		return r.writeFailure(err)
+		// A plan without a folder of sereno's is the one of `export --to`.
+		return r.writeFailure(err, plan.Root != "")
 	}
 	return plan.ExitCode()
 }
 
 // writeFailure reports a plan that stopped half way. What was carried out
 // until then is recorded in the manifest (R13), so the message says how to
-// go on.
-func (r *run) writeFailure(err error) int {
+// go on; for files sereno keeps no record of (tracked is false) it says
+// that instead.
+func (r *run) writeFailure(err error, tracked bool) int {
 	var sandbox *engine.SandboxError
 	switch {
+	case errors.Is(err, engine.ErrBusy):
+		return r.busy()
+	case errors.As(err, &sandbox) && sandbox.Err != nil:
+		// The check could not be made: where the path leads is not known.
+		r.warn(Program + ": " + r.T("error.sandbox.unchecked", sandbox.Path, engine.SandboxEnv, sandbox.Sandbox, sandbox.Err))
 	case errors.As(err, &sandbox):
 		r.warn(Program + ": " + r.T("error.sandbox", sandbox.Path, engine.SandboxEnv, sandbox.Sandbox))
 	case errors.Is(err, context.Canceled):
@@ -137,7 +146,19 @@ func (r *run) writeFailure(err error) int {
 	default:
 		r.warn(Program + ": " + r.T("error.write", err))
 	}
-	r.warn(r.T("error.write.next"))
+	if tracked {
+		r.warn(r.T("error.write.next"))
+	} else {
+		r.warn(r.T("error.write.next.untracked"))
+	}
+	return engine.ExitFailure
+}
+
+// busy reports a command that made way for another sereno (exit code 1). It
+// wrote nothing, so there is nothing to finish or to take back: the one
+// sentence says all there is to do.
+func (r *run) busy() int {
+	r.warn(Program + ": " + r.T("error.busy"))
 	return engine.ExitFailure
 }
 
@@ -145,6 +166,9 @@ func (r *run) writeFailure(err error) int {
 // error itself is in the words of the system or of the engine, which are not
 // translated; the sentence around it is.
 func (r *run) failure(err error) int {
+	if errors.Is(err, engine.ErrBusy) {
+		return r.busy()
+	}
 	r.warn(Program + ": " + r.T("error.before", err))
 	return engine.ExitFailure
 }
@@ -152,9 +176,20 @@ func (r *run) failure(err error) int {
 // printRefusals prints the reasons a plan was not started (R13): for each,
 // the path it is about, the reason, and the way out. Everything goes to
 // standard error; nothing was written.
+//
+// One thing in the way of many files is one reason: a file where a folder
+// should be is reported with the first path it stops, not with every one.
 func (r *run) printRefusals(refusals []engine.Refusal) int {
 	r.warn(Program + ": " + r.T("refusal.header"))
+	blockers := map[string]bool{}
 	for _, refusal := range refusals {
+		if refusal.Reason.Key == engine.ReasonParent && len(refusal.Reason.Args) > 0 {
+			blocker := fmt.Sprint(refusal.Reason.Args[0])
+			if blockers[blocker] {
+				continue
+			}
+			blockers[blocker] = true
+		}
 		r.warn("  " + refusal.Path + ": " + refusal.Reason.Text(r.catalog.T))
 		advice := refusal.Advice.Text(r.catalog.T)
 		if advice == "" {

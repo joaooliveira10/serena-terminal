@@ -44,11 +44,14 @@ func runUninstall(r *run, p parsed) int {
 	}
 
 	// What Windows Terminal remembers is looked at before the fragment goes.
-	remembered := !hooksOnly && r.terminalRemembers(s)
+	remembered := !hooksOnly && r.terminalRemembers()
 
-	plan, err := engine.PlanUninstall(engine.UninstallRequest{Root: s.root.Path, Version: r.env.Version, Shells: only})
+	plan, err := engine.PlanUninstall(engine.UninstallRequest{Root: s.root.Path, Version: r.env.Version, Shells: only, Manifest: s.manifest})
 	if err != nil {
 		return r.failure(err)
+	}
+	if plan.Refused() {
+		return r.printRefusals(plan.Refusals)
 	}
 	r.printPlan(plan)
 	code := plan.ExitCode()
@@ -57,16 +60,26 @@ func runUninstall(r *run, p parsed) int {
 			return code
 		}
 	}
+	// What is said about a skip line. `uninstall --hook` keeps the record of
+	// a line it could not take out, so the command can be run again. A whole
+	// uninstall deletes the manifest: what it leaves is the user's to remove.
+	left := r.T("plan.incomplete")
+	if !hooksOnly {
+		left = r.T("plan.incomplete.uninstall")
+		if dryRun {
+			left = r.T("plan.incomplete.uninstall.dry-run")
+		}
+	}
 	// A dry run ends with the sentence of R13; a real run says first that it
 	// is done and then what it could not take back.
 	if dryRun {
 		if !hooksOnly {
 			r.uninstallRemains(s, remembered)
 		}
-		r.closePlan(plan, true)
+		r.closePlan(plan, true, left)
 		return code
 	}
-	r.closePlan(plan, false)
+	r.closePlan(plan, false, left)
 	if !hooksOnly {
 		r.say("")
 		r.uninstallRemains(s, remembered)
@@ -76,16 +89,15 @@ func runUninstall(r *run, p parsed) int {
 
 // terminalRemembers reports whether Windows Terminal will keep something of
 // the Serena profile after the fragment is gone: the entry it wrote into its
-// settings.json, or the GUID in its state.json (R39). Only a fragment with a
-// profile leaves such traces, and only once Windows Terminal has loaded it.
-// When the two files cannot be read, the answer is yes: better one sentence
-// too many than a trace nobody mentioned.
-func (r *run) terminalRemembers(s *site) bool {
+// settings.json, or the GUID in its state.json (R39). What counts is what
+// those two files hold, not what sereno's fragment looks like today: an apply
+// with --no-profile takes the profile out of the fragment and leaves the
+// entry of Windows Terminal where it is. When the two files cannot be read,
+// the answer is yes: better one sentence too many than a trace nobody
+// mentioned.
+func (r *run) terminalRemembers() bool {
 	terminal, onWindows, err := r.windowsTerminal()
-	if err != nil || !onWindows || !s.manifest.Options.Profile {
-		return false
-	}
-	if _, owned := r.owns(s.manifest, terminal.fragmentPath); !owned {
+	if err != nil || !onWindows {
 		return false
 	}
 	installation := terminal.installation

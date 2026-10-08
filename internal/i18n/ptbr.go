@@ -4,17 +4,19 @@ package i18n
 // english (en.go), key for key and argument for argument.
 var portuguese = map[string]string{
 	// Saída do plano (R13, R14). Os verbos não são traduzidos.
-	"plan.nothing-changed":    "Nada foi alterado.",
-	"plan.note.kept":          "já está como desejado",
-	"plan.note.edited":        "editado depois que o sereno o gravou; mantido como está",
-	"plan.note.not-regular":   "não é mais um arquivo comum; mantido como está",
-	"plan.note.backup-of":     "cópia de %s de antes da linha de hook",
-	"plan.note.backup-kept":   "%s mudou depois que a linha de hook foi adicionada, então o backup fica",
-	"plan.note.hook-present":  "a linha de hook já está lá",
-	"plan.note.hook-replaces": "substitui a linha do sereno que está lá",
-	"plan.note.hook-removed":  "linha de hook removida",
-	"plan.note.hook-restored": "de volta ao conteúdo de antes da linha de hook",
-	"plan.note.bash-profile":  "o Git for Windows vai criar o ~/.bash_profile sozinho",
+	"plan.nothing-changed":       "Nada foi alterado.",
+	"plan.note.kept":             "já está como desejado",
+	"plan.note.edited":           "editado depois que o sereno o gravou; mantido como está",
+	"plan.note.read-only":        "é somente leitura; mantido como está",
+	"plan.note.not-regular":      "não é mais um arquivo comum; mantido como está",
+	"plan.note.backup-of":        "cópia de %s de antes da linha de hook",
+	"plan.note.backup-kept":      "%s mudou depois que a linha de hook foi adicionada, então o backup fica",
+	"plan.note.backup-kept-line": "a linha de hook continua em %s, então o backup fica",
+	"plan.note.hook-present":     "a linha de hook já está lá",
+	"plan.note.hook-replaces":    "substitui a linha do sereno que está lá",
+	"plan.note.hook-removed":     "linha de hook removida",
+	"plan.note.hook-restored":    "de volta ao conteúdo de antes da linha de hook",
+	"plan.note.bash-profile":     "o Git for Windows vai criar o ~/.bash_profile sozinho",
 
 	// Recusas (R4 código 3, R15, R20, R22). Cada uma vem depois do caminho.
 	"refusal.foreign":            "existe e não foi gravado pelo sereno",
@@ -41,17 +43,20 @@ var portuguese = map[string]string{
 	"refusal.advice.policy":      "O sereno não muda a política. Para permitir os seus próprios scripts, rode você mesmo:",
 
 	// O que o apply diz sobre o Windows Terminal (R19).
-	"wt.notice.stub": "O Windows Terminal adiciona uma entrada curta para o perfil Serena ao seu próprio settings.json na primeira vez que o vê, como faz com todo perfil de fragmento. O sereno não grava esse arquivo. Use --no-profile para instalar só os esquemas de cores.",
+	"wt.notice.stub": "Na primeira vez que vê o perfil Serena, o Windows Terminal adiciona uma entrada curta para ele ao settings.json dele mesmo, como faz com todo perfil de fragmento. O sereno não grava esse arquivo. Use --no-profile para instalar só os esquemas de cores.",
 	"wt.notice.open": "Abra uma nova janela do Windows Terminal e escolha Serena no menu de nova aba. Se ele não aparecer na lista, feche todas as janelas do Windows Terminal e abra de novo.",
 
 	// Saída do plano nos comandos (R13, R14).
-	"plan.summary":        "Total: %s.",
-	"plan.summary.empty":  "Total: nada a fazer.",
-	"plan.dry-run":        "Isto foi só uma simulação. Para valer, rode o mesmo comando sem --dry-run.",
-	"plan.nothing-to-do":  "Nada a fazer: nenhum arquivo foi gravado.",
-	"plan.done":           "Pronto.",
-	"plan.incomplete":     "Alguma coisa ficou como estava: veja as linhas skip acima. O sereno não sobrescreve, não edita e não apaga um arquivo nessa situação. Depois de resolver você mesmo, rode o comando de novo.",
-	"plan.note.wt-absent": "o Windows Terminal não foi encontrado, então o fragmento dele não é gravado",
+	"plan.summary":       "Total: %s.",
+	"plan.summary.empty": "Total: nada a fazer.",
+	"plan.dry-run":       "Isto foi só uma simulação. Para valer, rode o mesmo comando sem --dry-run.",
+	"plan.nothing-to-do": "Nada a fazer: nenhum arquivo foi gravado.",
+	"plan.done":          "Pronto.",
+	"plan.incomplete":    "Alguma coisa ficou como estava: veja as linhas skip acima. O sereno não sobrescreve, não edita e não apaga um arquivo nessa situação. Depois de resolver você mesmo, rode o comando de novo.",
+	// Depois de um uninstall o manifesto não existe mais: não há "de novo".
+	"plan.incomplete.uninstall":         "Alguma coisa ficou como estava: veja as linhas skip acima. O sereno não editou nem apagou, e isso não está mais registrado: remova você mesmo (uma linha de hook é a que aparece depois de `-`).",
+	"plan.incomplete.uninstall.dry-run": "Alguma coisa ficaria como está: veja as linhas skip acima. O sereno não edita nem apaga, e depois do uninstall isso não fica mais registrado: você teria de remover você mesmo (uma linha de hook é a que aparece depois de `-`).",
+	"plan.note.wt-absent":               "o Windows Terminal não foi encontrado, então o fragmento dele não é gravado",
 
 	// Recusas dos comandos e a saída para as recusas do motor.
 	"refusal.header":               "recusado, e nada foi alterado:",
@@ -86,11 +91,19 @@ var portuguese = map[string]string{
 	"error.root":          "não foi possível saber onde fica a pasta do sereno: %s",
 	"error.manifest":      "o manifesto %[1]s não pôde ser lido: %[2]s",
 	"error.manifest.next": "Sem ele o sereno não sabe quais arquivos são dele, então não mexe em nada. Restaure o arquivo; ou, para começar do zero, apague à mão a pasta do sereno e qualquer linha terminada em `# sereno:hook`.",
-	"error.hook":          "não foi possível encontrar o arquivo de inicialização de %[1]s: %[2]s",
-	"error.sandbox":       "parou antes de gravar %[1]s: fica fora de %[2]s=%[3]s",
-	"error.interrupted":   "interrompido",
-	"error.write":         "parou: %s",
-	"error.write.next":    "O que foi gravado até aqui está registrado, então nada se perde de vista: rode o comando de novo para terminar, ou `sereno uninstall` para desfazer.",
+	// O manifesto tem um número de formato acima do que esta versão lê.
+	"error.manifest.newer": "Esta pasta foi gravada por um sereno mais novo. Use essa versão, inclusive para desinstalar.",
+	"error.hook":           "não foi possível encontrar o arquivo de inicialização de %[1]s: %[2]s",
+	"error.sandbox":        "parou antes de gravar %[1]s: fica fora de %[2]s=%[3]s",
+	// A própria conferência falhou, por exemplo num link ou numa junção no caminho.
+	"error.sandbox.unchecked": "parou antes de gravar %[1]s: não foi possível conferir se fica dentro de %[2]s=%[3]s (%[4]s)",
+	"error.interrupted":       "interrompido",
+	// Dois comandos ao mesmo tempo: este cedeu a vez e não gravou nada.
+	"error.busy":       "outro sereno está trabalhando nesta pasta; rode o comando de novo quando ele terminar",
+	"error.write":      "parou: %s",
+	"error.write.next": "O que foi gravado até aqui está registrado, então nada se perde de vista: rode o comando de novo para terminar, ou `sereno uninstall` para desfazer.",
+	// Para arquivos gravados com `export --to`, dos quais o sereno não mantém registro.
+	"error.write.next.untracked": "Os arquivos gravados até aqui ficam na pasta que você indicou; o sereno não mantém registro deles. Rode o comando de novo para terminar ou apague-os você mesmo.",
 
 	// Depois de um apply.
 	"apply.note.schemes-only": "Os seis esquemas de cores Serena agora estão disponíveis para o Windows Terminal (Configurações > Esquemas de cores); nenhum perfil foi adicionado.",
@@ -120,7 +133,7 @@ var portuguese = map[string]string{
 	"theme.paint.multiplexer.next":  "Rode o comando fora do tmux ou do screen.",
 	"theme.paint.done":              "Este terminal agora mostra %s. Nada foi gravado em disco; `sereno theme --reset` devolve ao terminal as cores dele.",
 	"theme.reset.done":              "O terminal recebeu o pedido para voltar às próprias cores.",
-	"theme.changed":                 "As sessões no Windows Terminal leem a nova configuração no próximo prompt; as outras, quando forem abertas.",
+	"theme.changed":                 "As sessões que acompanham o sistema leem a nova configuração no próximo prompt; as outras, quando forem abertas.",
 
 	// Palavras e rótulos dos relatórios de theme e status. As cinco
 	// configurações mantêm os nomes do arquivo mode e não estão aqui.
@@ -150,8 +163,8 @@ var portuguese = map[string]string{
 
 	// status (R37).
 	"status.applied.no":          "não (`sereno apply --dry-run` mostra o que seria gravado)",
-	"status.session":             "%[1]s, aberta pelo perfil Serena: %[2]s",
-	"status.session.other":       "nem Windows Terminal nem VS Code",
+	"status.session":             "%[1]s; aberta pelo perfil Serena: %[2]s",
+	"status.session.other":       "outro terminal (nem Windows Terminal nem VS Code)",
 	"status.wt.detected":         "detectado",
 	"status.wt.absent":           "não encontrado",
 	"status.wt.fragment.profile": "fragmento do sereno instalado, com o perfil Serena",
@@ -174,7 +187,7 @@ var portuguese = map[string]string{
 	"wt.defaults-override":    "O settings.json do Windows Terminal define %s em profiles.defaults, e isso prevalece sobre o que o perfil Serena pede.",
 	"wt.profile-suppressed":   "O Windows Terminal já viu o perfil Serena antes e a entrada dele sumiu do settings.json; por isso ele mantém o perfil oculto. Para o perfil voltar a aparecer, adicione este objeto a profiles.list em %[1]s: %[2]s",
 	"wt.settings-unreadable":  "%[1]s não pôde ser lido como JSON (%[2]s); o que depende dele não é informado.",
-	"owned.modified":          "Editados depois que o sereno os gravou: %s. O apply e o uninstall deixam um arquivo assim como está; apague-o para o sereno gravá-lo de novo.",
+	"owned.modified":          "Editados depois que o sereno os gravou: %s. O apply deixa um arquivo assim como está e o uninstall também, menos o arquivo mode, que o uninstall sempre apaga; apague o arquivo para o sereno gravá-lo de novo.",
 	"owned.missing":           "Gravados pelo sereno e não estão mais lá: %s. O `sereno apply` grava de novo.",
 	"hook.missing":            "A linha de hook de %[1]s não está mais em %[2]s. O `sereno apply` a coloca de volta; `sereno uninstall --hook %[1]s` a esquece.",
 	"hook.missing.unreadable": "Não dá para procurar a linha de hook de %[1]s: %[2]s %[3]s.",
@@ -189,12 +202,15 @@ var portuguese = map[string]string{
 	"check.failure":       "%[1]s: %[2]s sobre %[3]s dá %[4]s:1, abaixo do piso de %[5]s",
 	"check.role":          "o papel %[1]s usa o SGR %[2]s: %[3]s",
 	"check.all-pass":      "Todos os valores estão no piso ou acima dele.",
-	"check.some-fail":     "%v valor(es) abaixo do piso ou não permitido(s).",
+	"check.some-fail":     "Abaixo do piso ou não permitidos: %v.",
 	"show.slots":          "Os dezesseis slots, com os valores de %s",
 	"show.roles":          "Papéis (nome, parâmetros SGR, amostra)",
 	"show.contrast":       "Contraste (razão WCAG para 1)",
 	"show.contrast.slots": "slots 1 a 15 sobre o fundo: mínimo %[1]s no slot %[2]s (piso %[3]s)",
 	"show.contrast.pair":  "%[1]s sobre %[2]s: %[3]s (piso %[4]s)",
+	// O que representa a melhor das duas cores em que o Windows Terminal
+	// desenha o texto selecionado.
+	"show.contrast.black-or-white": "texto preto ou branco",
 
 	// export (R38).
 	"export.not-applied":      "o sereno não foi aplicado aqui, e o `sereno export` grava na pasta dele (%s) quando você não indica outra",
@@ -246,7 +262,7 @@ var portuguese = map[string]string{
 	"help.status.flag.json": "o mesmo relatório em JSON, com chaves que não são traduzidas",
 
 	"help.check.summary":       "mede o contraste da paleta",
-	"help.check.about":         "Mede cada cor das seis variantes contra o fundo dela (razão de contraste WCAG) e termina com código de saída 1 quando alguma fica abaixo do piso: 4,5 para dark e light, 7,0 para alto contraste.",
+	"help.check.about":         "Mede cada cor das seis variantes contra o fundo dela (razão de contraste WCAG) e termina com código de saída 1 quando alguma fica abaixo do piso: 4.5 para dark e light, 7.0 para alto contraste.",
 	"help.check.flag.json":     "as medições em JSON",
 	"help.check.flag.markdown": "a tabela de docs/contrast.md",
 

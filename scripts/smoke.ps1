@@ -6,15 +6,31 @@
 #
 # The program never sees the real home. Before its first start this script
 # creates a temporary folder and points HOME, USERPROFILE, LOCALAPPDATA,
-# APPDATA, XDG_DATA_HOME, SERENO_HOME and the two SERENO_*_PROFILE_PATH
-# variables into it, and sets SERENO_SANDBOX to it, so that sereno itself
-# refuses any write outside. The folder is removed at the end.
+# APPDATA, XDG_DATA_HOME and the two SERENO_*_PROFILE_PATH variables into it,
+# and sets SERENO_SANDBOX to it, so that sereno itself refuses any write
+# outside. The folder is removed at the end.
 #
-# Two passes, each compared with a SHA-256 listing of the whole temporary home
-# taken before it:
-#   1. a home with a Windows Terminal folder: apply --dry-run, apply, apply
-#      again, status --json, theme light, check, export --to, uninstall;
-#   2. sereno's folder under a name with a quote, a space and a dollar sign,
+# SERENO_HOME is taken out of the environment for the first pass, on purpose:
+# sereno's folder is then the default one, %LOCALAPPDATA%\sereno, which is
+# what a machine without that variable gets, and it lies in the temporary home
+# because LOCALAPPDATA does. Only with the default folder does the program
+# write the fragment and the hook lines in the forms of R18 and R21 that name
+# the folder through a variable. The third pass sets SERENO_HOME, to a folder
+# in the temporary home.
+#
+# Three passes, each compared with a SHA-256 listing of the whole temporary
+# home taken before it:
+#   1. a home with a Windows Terminal folder and sereno's folder in its
+#      default place: apply --dry-run, apply, apply again, status --json,
+#      theme light, check, export --to, apply --hook, uninstall;
+#   2. six `apply --hook` started one right after the other, six times over:
+#      at least one runs to its end, the others find nothing left to do or
+#      make way before their first write, and afterwards nothing counts as
+#      edited or missing, an apply has nothing to do and uninstall gives the
+#      home back (R13, R39). How many made way is printed, not judged: it
+#      depends on how quickly the machine starts a process (the tests of
+#      test/e2e start the commands at the same instant);
+#   3. sereno's folder under a name with a quote, a space and a dollar sign,
 #      with the program in its bin folder: apply --hook, then a PowerShell and
 #      a Git Bash session that load the hooked profile and call sereno through
 #      the function of the init file, then uninstall.
@@ -94,10 +110,34 @@ function Invoke-Sereno([string[]]$arguments) {
     , $lines
 }
 
+# Starts the program several times, one right after the other and without
+# waiting, each as a process of its own without a window, in the environment
+# of this script. Returns, for each, the exit code and what it wrote on
+# standard error. Whether two of them meet depends on the machine: where a
+# process takes longer to start than sereno takes for its work, they do not.
+function Start-Together([string[]]$arguments, [int]$count) {
+    $started = foreach ($number in 1..$count) {
+        $start = New-Object System.Diagnostics.ProcessStartInfo
+        $start.FileName = $binary
+        $start.Arguments = $arguments -join ' '
+        $start.UseShellExecute = $false
+        $start.CreateNoWindow = $true
+        $start.RedirectStandardOutput = $true
+        $start.RedirectStandardError = $true
+        $process = [System.Diagnostics.Process]::Start($start)
+        @{ Process = $process; Out = $process.StandardOutput.ReadToEndAsync(); Err = $process.StandardError.ReadToEndAsync() }
+    }
+    foreach ($one in $started) {
+        $one.Process.WaitForExit()
+        $null = $one.Out.Result
+        @{ Code = $one.Process.ExitCode; Err = $one.Err.Result }
+    }
+}
+
 $sandbox = @{
     HOME = $userHome; USERPROFILE = $userHome; HOMEDRIVE = $userHome.Substring(0, 2); HOMEPATH = $userHome.Substring(2)
     LOCALAPPDATA = $local; APPDATA = (Join-Path $userHome 'AppData\Roaming'); XDG_DATA_HOME = (Join-Path $userHome '.local\share')
-    SERENO_HOME = (Join-Path $local 'sereno'); SERENO_SANDBOX = $tmp
+    SERENO_HOME = $null; SERENO_SANDBOX = $tmp
     SERENO_PS_PROFILE_PATH = (Join-Path $userHome 'Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1')
     SERENO_PWSH_PROFILE_PATH = (Join-Path $userHome 'Documents\PowerShell\Microsoft.PowerShell_profile.ps1')
     SERENO_OS_MODE = 'dark'; SERENO_SESSION = $null; SERENO_REG_ROOT = $null; SERENO_LANG = $null; ZDOTDIR = $null
@@ -108,10 +148,28 @@ $saved = @{}
 try {
     foreach ($key in $sandbox.Keys) { $saved[$key] = [Environment]::GetEnvironmentVariable($key); [Environment]::SetEnvironmentVariable($key, $sandbox[$key]) }
 
+    $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    # Git Bash is the bash of the Git for Windows that git.exe belongs to; the
+    # bash.exe of System32 is the launcher of WSL and must not be taken for it.
+    $bash = $null
+    $git = Get-Command git.exe -ErrorAction SilentlyContinue
+    if ($git) {
+        $folder = Split-Path -Parent $git.Source
+        for ($up = 0; ($up -lt 3) -and $folder -and (-not $bash); $up++) {
+            $candidate = Join-Path $folder 'bin\bash.exe'
+            if (Test-Path -LiteralPath $candidate) { $bash = $candidate }
+            $folder = Split-Path -Parent $folder
+        }
+    }
+    $hooks = 'powershell'
+    if ($bash) { $hooks = 'powershell,bash' }
+    $profilePath = $env:SERENO_PS_PROFILE_PATH
+
     # -----------------------------------------------------------------------
-    # 1. A home with Windows Terminal, sereno's folder in a plain place.
-    Write-Host '# pass 1: apply, status, theme, check, export, uninstall'
-    $root = $env:SERENO_HOME
+    # 1. A home with Windows Terminal, sereno's folder in its default place:
+    #    SERENO_HOME is not set.
+    Write-Host '# pass 1: the default folder: apply, status, theme, check, export, hooks, uninstall'
+    $root = Join-Path $local 'sereno'
     $fragment = Join-Path $local 'Microsoft\Windows Terminal\Fragments\SerenaTerminal\sereno.json'
     $null = New-Item -ItemType Directory -Path (Join-Path $local 'Microsoft\Windows Terminal') -Force
     $before = Get-Tree $userHome
@@ -137,6 +195,11 @@ try {
         }
         Confirm $same 'the installed init files are the rendered ones, byte for byte'
     }
+    # The fragment of a default folder names init.ps1 through %LOCALAPPDATA%
+    # (R18): it is the same file on every machine, and the golden one.
+    $golden = Join-Path $repo 'testdata\golden'
+    if ($Rendered) { $golden = $Rendered }
+    Confirm ((Get-FileHash -LiteralPath $fragment -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath (Join-Path $golden 'fragment\auto-soft.json') -Algorithm SHA256).Hash) 'the fragment of the default folder is fragment\auto-soft.json, byte for byte'
     $applied = Get-Tree $userHome
 
     $out = Invoke-Sereno @('apply', '--lang', 'en')
@@ -163,6 +226,20 @@ try {
     $out = Invoke-Sereno @('export', '--to', $themes, '--lang', 'en')
     Confirm (($script:code -eq 0) -and (@(Get-ChildItem -LiteralPath $themes -Recurse -File).Count -eq 24)) 'export --to wrote 24 theme files'
 
+    # The hook lines of the default folder are the lines of R21, letter for
+    # letter: they name the folder through a variable of the session. Both
+    # files are new, so the line is all they hold.
+    $out = Invoke-Sereno @('apply', '--hook', $hooks, '--lang', 'en')
+    $line = 'if (Test-Path -LiteralPath "$env:LOCALAPPDATA\sereno\shell\init.ps1") { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook'
+    Confirm (($script:code -eq 0) -and (Test-Path -LiteralPath $profilePath) -and ([IO.File]::ReadAllText($profilePath) -ceq ($line + "`r`n"))) 'apply --hook wrote the PowerShell hook line of the default folder, as R21 has it'
+    if ($bash) {
+        $line = '[ -r "$LOCALAPPDATA/sereno/shell/init.bash" ] && . "$LOCALAPPDATA/sereno/shell/init.bash" # sereno:hook'
+        $bashrc = Join-Path $userHome '.bashrc'
+        Confirm ((Test-Path -LiteralPath $bashrc) -and ([IO.File]::ReadAllText($bashrc) -ceq ($line + "`n"))) 'apply --hook wrote the Git Bash hook line of the default folder, as R21 has it'
+    } else {
+        Write-Host 'skip - Git Bash was not found next to git.exe: its hook line was not tried'
+    }
+
     # In Portuguese only the exit codes are looked at: Windows PowerShell
     # reads the UTF-8 the program writes in the code page of the console.
     $null = Invoke-Sereno @('status', '--lang', 'pt-BR'); $statusCode = $script:code
@@ -174,8 +251,36 @@ try {
     Confirm-Tree $before 'after uninstall the home is what it was, file for file'
 
     # -----------------------------------------------------------------------
-    # 2. A folder with an awkward name, hooks, and sessions that load them.
-    Write-Host '# pass 2: hooks from a folder with a quote, a space and a dollar sign'
+    # 2. Commands at the same time. One sereno writes the folder; another one
+    #    that comes at that moment makes way, with exit code 1 and before its
+    #    first write, and says so.
+    Write-Host '# pass 2: six applies one right after the other, six times'
+    $whole = $true
+    $waited = 0
+    for ($round = 1; $round -le 6; $round++) {
+        $problems = @()
+        $results = @(Start-Together @('apply', '--hook', $hooks, '--lang', 'en') 6)
+        $done = @($results | Where-Object { $_.Code -eq 0 }).Count
+        $madeWay = @($results | Where-Object { ($_.Code -eq 1) -and (($_.Err -clike '*another sereno is working on this folder*') -or ($_.Err -clike '*: changed while sereno was running*')) }).Count
+        $waited += $madeWay
+        if (($done -lt 1) -or (($done + $madeWay) -ne $results.Count)) {
+            $problems += 'exit codes ' + (($results | ForEach-Object { $_.Code }) -join ' ') + '; ' + (($results | ForEach-Object { $_.Err.Trim() } | Where-Object { $_ }) -join ' | ')
+        }
+        $status = (Invoke-Sereno @('status', '--json')) -join "`n" | ConvertFrom-Json
+        if (($status.owned.modified -ne 0) -or ($status.owned.missing -ne 0)) { $problems += "status counts $($status.owned.modified) files as edited and $($status.owned.missing) as missing" }
+        $out = Invoke-Sereno @('apply', '--hook', $hooks, '--lang', 'en')
+        if (($script:code -ne 0) -or (@($out | Where-Object { $_ -cmatch '^  (mkdir|create|replace|append|remove|rmdir) ' }).Count -ne 0)) { $problems += "the apply that follows ends with exit code $($script:code) or still has something to do" }
+        $null = Invoke-Sereno @('uninstall', '--lang', 'en')
+        if ($script:code -ne 0) { $problems += "uninstall ends with exit code $($script:code)" }
+        if ((Get-Tree $userHome) -cne $before) { $problems += 'after uninstall the home is not what it was' }
+        foreach ($problem in $problems) { Write-Host "#   round ${round}: $problem"; $whole = $false }
+    }
+    Confirm $whole 'each time one apply ran to its end, the others had nothing left to do or made way, and uninstall gave the home back'
+    Write-Host "# $waited of 36 applies made way for another one"
+
+    # -----------------------------------------------------------------------
+    # 3. A folder with an awkward name, hooks, and sessions that load them.
+    Write-Host '# pass 3: hooks from a folder with a quote, a space and a dollar sign'
     $root = Join-Path $userHome "o'neil `$HOME folder\sereno"
     [Environment]::SetEnvironmentVariable('SERENO_HOME', $root)
     # The place the install script will use (R41). apply and uninstall leave
@@ -184,24 +289,7 @@ try {
     Copy-Item -LiteralPath $binary -Destination (Join-Path $root 'bin\sereno.exe')
     $before = Get-Tree $userHome
 
-    $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    # Git Bash is the bash of the Git for Windows that git.exe belongs to; the
-    # bash.exe of System32 is the launcher of WSL and must not be taken for it.
-    $bash = $null
-    $git = Get-Command git.exe -ErrorAction SilentlyContinue
-    if ($git) {
-        $folder = Split-Path -Parent $git.Source
-        for ($up = 0; ($up -lt 3) -and $folder -and (-not $bash); $up++) {
-            $candidate = Join-Path $folder 'bin\bash.exe'
-            if (Test-Path -LiteralPath $candidate) { $bash = $candidate }
-            $folder = Split-Path -Parent $folder
-        }
-    }
-    $hooks = 'powershell'
-    if ($bash) { $hooks = 'powershell,bash' }
-
     $out = Invoke-Sereno @('apply', '--hook', $hooks, '--lang', 'en')
-    $profilePath = $env:SERENO_PS_PROFILE_PATH
     Confirm (($script:code -eq 0) -and (Test-Path -LiteralPath $profilePath) -and ((Get-Content -LiteralPath $profilePath -Raw) -clike '*# sereno:hook*')) 'apply --hook created the PowerShell profile with the hook line'
     $hooked = Get-Tree $userHome
 

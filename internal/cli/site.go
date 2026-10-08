@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -41,7 +42,13 @@ func (r *run) site() (s *site, ok bool) {
 	manifest, applied, err := engine.LoadManifest(root.Path)
 	if err != nil {
 		r.warn(Program + ": " + r.T("error.manifest", filepath.Join(root.Path, engine.ManifestName), err))
-		r.warn(r.T("error.manifest.next"))
+		var schema *engine.SchemaError
+		if errors.As(err, &schema) && schema.Got > engine.Schema {
+			// Not a damaged file: restoring or deleting it is the wrong advice.
+			r.warn(r.T("error.manifest.newer"))
+		} else {
+			r.warn(r.T("error.manifest.next"))
+		}
 		return nil, false
 	}
 	s = &site{root: root, manifest: manifest, applied: applied, modePath: filepath.Join(root.Path, engine.ModeName)}
@@ -81,6 +88,23 @@ func (r *run) owns(manifest *engine.Manifest, path string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// profileInstalled reports whether the fragment sereno installed carries the
+// Serena profile. The file decides, not the option the last apply recorded:
+// after an apply that could not replace the fragment the two differ, and what
+// Windows Terminal shows is the file. The option stands in only when the
+// file cannot be read as a fragment.
+func (r *run) profileInstalled(s *site, fragmentPath string) bool {
+	if data, err := os.ReadFile(fragmentPath); err == nil {
+		var fragment struct {
+			Profiles []json.RawMessage `json:"profiles"`
+		}
+		if json.Unmarshal(data, &fragment) == nil {
+			return len(fragment.Profiles) > 0
+		}
+	}
+	return s.manifest.Options.Profile
 }
 
 // terminalSite is what a command knows about Windows Terminal on this host.

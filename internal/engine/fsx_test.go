@@ -3,6 +3,7 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -341,6 +342,78 @@ func TestGuardStopsAtJunctions(t *testing.T) {
 			t.Errorf("the junction is still there: %v", err)
 		}
 		unchanged("removing " + link)
+	}
+}
+
+// TestFailuresNameThePathOnce: an error of this file says what was tried, on
+// which path, and what the system answered, each once. Package os puts the
+// operation and the path in front of its errors as well, and for a write the
+// path it knows is that of the temporary file.
+func TestFailuresNameThePathOnce(t *testing.T) {
+	s := newSite(t, "")
+	if err := os.MkdirAll(s.root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(s.root, "no such folder")
+	check := func(what string, err error, prefix, path string) {
+		t.Helper()
+		if err == nil {
+			t.Errorf("%s did not fail", what)
+			return
+		}
+		text := err.Error()
+		if !strings.HasPrefix(text, prefix+" "+path+": ") || strings.Count(text, path) != 1 || strings.Count(text, prefix) != 1 || strings.Contains(text, "sereno-tmp") {
+			t.Errorf("%s: %q", what, text)
+		}
+	}
+	check("mkdir of a directory that exists", Mkdir(s.root), "mkdir", s.root)
+	if err := Mkdir(s.root); !errors.Is(err, fs.ErrExist) {
+		t.Errorf("the cause is lost: errors.Is(%v, fs.ErrExist) is false", err)
+	}
+	check("mkdir below a missing directory", Mkdir(filepath.Join(missing, "x")), "mkdir", filepath.Join(missing, "x"))
+	check("write into a missing directory", WriteFile(filepath.Join(missing, "file"), []byte("x"), FilePerm), "write", filepath.Join(missing, "file"))
+	check("remove of a missing file", RemoveFile(filepath.Join(s.root, "nothing")), "remove", filepath.Join(s.root, "nothing"))
+	if err := RemoveFile(filepath.Join(s.root, "nothing")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the cause is lost: errors.Is(%v, fs.ErrNotExist) is false", err)
+	}
+	// A rename that fails: the target is a directory.
+	target := filepath.Join(s.root, "taken")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	check("write over a directory", WriteFile(target, []byte("x"), FilePerm), "write", target)
+	if entries, _ := os.ReadDir(s.root); len(entries) != 1 {
+		t.Errorf("a temporary file was left behind: %v", entries)
+	}
+}
+
+// TestWriteOverAReadOnlyFile: Windows does not replace a file that is marked
+// read-only. That is not a file somebody is looking at for a moment, so the
+// write fails at once instead of trying for two seconds. Elsewhere the mark
+// does not stop a rename, and the write goes through; planning is what
+// leaves such a file alone on every system (see TestReadOnlyOwnedFileIsSkipped).
+func TestWriteOverAReadOnlyFile(t *testing.T) {
+	s := newSite(t, "")
+	path := filepath.Join(s.root, "file")
+	put(t, path, "old\n")
+	if err := os.Chmod(path, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(path, 0o644) })
+	start := time.Now()
+	err := WriteFile(path, []byte("new\n"), FilePerm)
+	if elapsed := time.Since(start); elapsed > patience/2 {
+		t.Errorf("WriteFile took %s", elapsed)
+	}
+	if runtime.GOOS == "windows" {
+		if err == nil || !strings.Contains(err.Error(), "read-only") || read(t, path) != "old\n" {
+			t.Errorf("WriteFile over a read-only file = %v, content %q", err, read(t, path))
+		}
+		if entries, _ := os.ReadDir(s.root); len(entries) != 1 {
+			t.Errorf("a temporary file was left behind: %v", entries)
+		}
+	} else if err != nil {
+		t.Errorf("WriteFile over a file without the write bit = %v", err)
 	}
 }
 

@@ -27,16 +27,19 @@ func runExport(r *run, p parsed) int {
 		return r.failure(err)
 	}
 
-	s, ok := r.site()
-	if !ok {
-		return engine.ExitFailure
-	}
+	// With `--to` nothing of sereno's folder is read or written: whether
+	// there is an installation, and in which state, does not matter.
+	var s *site
 	destination, custom := p.value("to")
 	if custom {
 		if destination, err = filepath.Abs(destination); err != nil {
 			return r.failure(err)
 		}
 	} else {
+		var ok bool
+		if s, ok = r.site(); !ok {
+			return engine.ExitFailure
+		}
 		if !s.applied {
 			return r.refuse(r.T("export.not-applied", s.root.Path), r.T("export.not-applied.next"))
 		}
@@ -58,7 +61,7 @@ func runExport(r *run, p parsed) int {
 	if custom {
 		plan, err = engine.PlanUntracked(files)
 	} else {
-		plan, err = engine.PlanApply(engine.Request{Root: s.root.Path, Version: r.env.Version, Files: files})
+		plan, err = engine.PlanApply(engine.Request{Root: s.root.Path, Version: r.env.Version, Files: files, Manifest: s.manifest})
 	}
 	if err != nil {
 		return r.failure(err)
@@ -71,7 +74,7 @@ func runExport(r *run, p parsed) int {
 	if code == engine.ExitFailure {
 		return code
 	}
-	r.closePlan(plan, false)
+	r.closePlan(plan, false, r.T("plan.incomplete"))
 
 	// Where the files go and how each emulator is told to use them.
 	dark, _ := pal.Variant("dark")

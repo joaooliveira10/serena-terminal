@@ -61,7 +61,7 @@ func (r *run) checkReport(report palette.Report, p parsed) int {
 	for _, variant := range report.Variants {
 		for _, m := range variant.Failures {
 			failures++
-			r.say("  " + r.T("check.failure", variant.ID, m.Subject, m.Against, ratio(m.Ratio), floor(m.Floor)))
+			r.say("  " + r.T("check.failure", variant.ID, r.subject(m.Subject), m.Against, ratio(m.Ratio), floor(m.Floor)))
 		}
 	}
 	for _, role := range report.Roles {

@@ -636,6 +636,57 @@ func TestUninstallLeavesADirectoryThatFilledUp(t *testing.T) {
 	}
 }
 
+// TestReadOnlyOwnedFileIsSkipped: an owned file that would be replaced and
+// that the user has marked read-only is left as it is, like a profile in that
+// state. The plan says so before anything is written, the exit code is 4,
+// and the manifest keeps the hash of the content that is there.
+func TestReadOnlyOwnedFileIsSkipped(t *testing.T) {
+	s := newSite(t, "")
+	mustApply(t, s.request("init v1\n"))
+	if err := os.Chmod(s.mode, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(s.mode, 0o644) })
+
+	start := time.Now()
+	plan := mustApply(t, s.upgrade())
+	if elapsed := time.Since(start); elapsed > patience/2 {
+		t.Errorf("the apply took %s", elapsed)
+	}
+	var skipped []Op
+	for _, op := range plan.Ops {
+		if op.Verb == VerbSkip {
+			skipped = append(skipped, op)
+		}
+	}
+	if len(skipped) != 1 || skipped[0].Path != s.mode || skipped[0].Note.Key != NoteReadOnly || !skipped[0].Incomplete || plan.ExitCode() != ExitIncomplete {
+		t.Errorf("exit %d:\n%s", plan.ExitCode(), describe(plan))
+	}
+	if read(t, s.mode) != "mode=auto\n" || read(t, s.init) != "init v2\n" {
+		t.Errorf("mode %q, init %q", read(t, s.mode), read(t, s.init))
+	}
+	if m := mustBeTrue(t, s); m.Owned[s.mode] != SHA256([]byte("mode=auto\n")) {
+		t.Error("the manifest records a hash for the mode file that it does not have")
+	}
+	// A read-only file that is already as wanted is kept, without a word.
+	if same := mustApply(t, s.request("init v2\n")); same.ExitCode() != ExitOK || same.Count(VerbSkip) != 0 {
+		t.Errorf("exit %d:\n%s", same.ExitCode(), describe(same))
+	}
+	// The mark comes off: the file is replaced. Uninstall removes it even
+	// with the mark on.
+	if err := os.Chmod(s.mode, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if again := mustApply(t, s.upgrade()); again.ExitCode() != ExitOK || read(t, s.mode) != "mode=dark\n" {
+		t.Errorf("exit %d:\n%s", again.ExitCode(), describe(again))
+	}
+	if err := os.Chmod(s.init, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	mustUninstall(t, UninstallRequest{Root: s.root})
+	sameTree(t, map[string]string{}, s.home.Dir, "after uninstall")
+}
+
 // TestApplyVerifiesWhatItPlannedFor changes a file between the two phases:
 // the write must not happen.
 func TestApplyVerifiesWhatItPlannedFor(t *testing.T) {

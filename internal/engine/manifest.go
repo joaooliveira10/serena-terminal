@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // Names of the entries of ROOT that the engine itself knows (R10).
@@ -41,6 +41,28 @@ type Manifest struct {
 	Schema int `json:"schema"`
 	// Version is the sereno version that wrote the manifest.
 	Version string `json:"version"`
+
+	// origin is the state of the manifest file this value was read from (see
+	// LoadManifest). It is not part of the file.
+	origin fileState
+}
+
+// fileState is what a command saw of a file at one moment: that it was not
+// there, or the SHA-256 of its bytes. known is false for a value that was
+// never filled in.
+type fileState struct {
+	known  bool
+	absent bool
+	sum    string
+}
+
+// stateOf describes the bytes of a file that was read; missing says that
+// there was no file.
+func stateOf(data []byte, missing bool) fileState {
+	if missing {
+		return fileState{known: true, absent: true}
+	}
+	return fileState{known: true, sum: SHA256(data)}
 }
 
 // Options are the recorded choices of apply (R12, R13).
@@ -153,7 +175,7 @@ func ParseManifest(data []byte) (*Manifest, error) {
 		return nil, errors.New("parse manifest: unexpected data after the object")
 	}
 	if m.Schema != Schema {
-		return nil, fmt.Errorf("parse manifest: schema %d is not supported by this version (it reads schema %d)", m.Schema, Schema)
+		return nil, &SchemaError{Got: m.Schema}
 	}
 	for path := range m.Owned {
 		if !filepath.IsAbs(path) {
@@ -169,22 +191,93 @@ func ParseManifest(data []byte) (*Manifest, error) {
 	return &m, nil
 }
 
+// SchemaError says that a manifest has another format number than this
+// version reads. A number above Schema means that a newer sereno wrote the
+// folder, which is something else than a file that is damaged.
+type SchemaError struct {
+	Got int // the number the manifest carries
+}
+
+// Error implements error.
+func (e *SchemaError) Error() string {
+	return fmt.Sprintf("parse manifest: schema %d is not supported by this version (it reads schema %d)", e.Got, Schema)
+}
+
 // LoadManifest reads ROOT/manifest.json. A missing file is not an error: it
 // yields an empty manifest and found is false, which is how "no previous
 // apply" looks.
+//
+// The manifest remembers which state of the file it was read from. A command
+// that builds a request on it hands it on (Request.Manifest), and planning
+// stops with ErrBusy when the file is no longer in that state: another sereno
+// has written it in between.
 func LoadManifest(root string) (m *Manifest, found bool, err error) {
-	data, err := os.ReadFile(filepath.Join(root, ManifestName))
-	if errors.Is(err, fs.ErrNotExist) {
-		return NewManifest(), false, nil
-	}
-	if err != nil {
-		return nil, false, fmt.Errorf("read manifest: %w", err)
-	}
-	m, err = ParseManifest(data)
+	data, state, err := readManifestFile(root)
 	if err != nil {
 		return nil, false, err
 	}
-	return m, true, nil
+	if m, err = manifestFrom(data, state); err != nil {
+		return nil, false, err
+	}
+	return m, !state.absent, nil
+}
+
+// readManifestFile reads the bytes of ROOT/manifest.json and says which state
+// of the file they are. A file that is not there, also because ROOT is not,
+// is a state and not an error.
+func readManifestFile(root string) ([]byte, fileState, error) {
+	var data []byte
+	// On Windows the file cannot be opened for a moment while another sereno
+	// puts a new one in its place.
+	err := retry(func() error {
+		var err error
+		data, err = os.ReadFile(filepath.Join(root, ManifestName))
+		return err
+	})
+	switch {
+	case isMissing(err):
+		return nil, stateOf(nil, true), nil
+	case err != nil:
+		return nil, fileState{}, fmt.Errorf("read manifest: %w", err)
+	}
+	return data, stateOf(data, false), nil
+}
+
+// manifestFrom turns what readManifestFile returned into a manifest that
+// remembers the state it was read from: an empty one when there is no file.
+func manifestFrom(data []byte, state fileState) (*Manifest, error) {
+	m := NewManifest()
+	if !state.absent {
+		var err error
+		if m, err = ParseManifest(data); err != nil {
+			return nil, err
+		}
+	}
+	m.origin = state
+	return m, nil
+}
+
+// recordDirs adds directories to the manifest that is on disk, for a command
+// that created them and cannot carry out its own plan (see Plan.settle). The
+// caller holds the lock. When there is no manifest, one is written for the
+// directories alone if create says so; version is what it then names as its
+// writer. The result is false when nothing was recorded.
+func recordDirs(root string, dirs []string, create bool, version string) bool {
+	m, found, err := LoadManifest(root)
+	if err != nil || (!found && !create) {
+		return false
+	}
+	if !found {
+		m.Version = version
+	}
+	for _, dir := range dirs {
+		m.insertDir(dir)
+	}
+	data, err := m.Encode()
+	if err != nil {
+		return false
+	}
+	return WriteFile(filepath.Join(root, ManifestName), data, FilePerm) == nil
 }
 
 // Hook returns the record of a shell's hook line.
@@ -229,6 +322,25 @@ func (m *Manifest) removeHook(shell string) {
 // addDir records a created directory once.
 func (m *Manifest) addDir(dir string) {
 	m.Dirs = withPath(m.Dirs, dir)
+}
+
+// insertDir records a created directory in front of the directories below
+// it, wherever they stand in the list: the list is in creation order, parents
+// first, and uninstall removes directories from its end.
+func (m *Manifest) insertDir(dir string) {
+	at := len(m.Dirs)
+	for i, existing := range m.Dirs {
+		if samePath(existing, dir) {
+			return
+		}
+		if at == len(m.Dirs) && strings.HasPrefix(pathKey(existing), pathKey(dir)+string(filepath.Separator)) {
+			at = i
+		}
+	}
+	dirs := make([]string, 0, len(m.Dirs)+1)
+	dirs = append(dirs, m.Dirs[:at]...)
+	dirs = append(dirs, dir)
+	m.Dirs = append(dirs, m.Dirs[at:]...)
 }
 
 // dropDir forgets a directory that was not created after all.

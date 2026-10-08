@@ -214,7 +214,7 @@ func (r *run) inspect(s *site) (statusReport, palette.Variant, error) {
 		wt.Detected = installation.Present
 		if recorded, owned := r.owns(s.manifest, terminal.fragmentPath); owned && isFile(recorded) {
 			wt.Fragment = true
-			wt.Profile = s.manifest.Options.Profile
+			wt.Profile = r.profileInstalled(s, recorded)
 		}
 		if !wt.Detected {
 			warn(WarnTerminalAbsent, r.T(WarnTerminalAbsent))

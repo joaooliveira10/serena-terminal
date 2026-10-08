@@ -167,6 +167,10 @@ var (
 	allowedSyscall = map[string]bool{
 		// Errors and plain types.
 		"Errno": true, "ENOTDIR": true, "ERROR_ACCESS_DENIED": true, "ERROR_MORE_DATA": true, "Handle": true,
+		// The lock of sereno's folder, on a file the engine has opened itself:
+		// flock on macOS and Linux, and on Windows the structure LockFileEx
+		// wants (see allowedProcedures). Neither opens or creates a file.
+		"Flock": true, "LOCK_EX": true, "LOCK_SH": true, "LOCK_NB": true, "LOCK_UN": true, "EWOULDBLOCK": true, "Overlapped": true,
 		// Text for the Windows API.
 		"UTF16PtrFromString": true,
 		// Reading values under HKEY_CURRENT_USER (R28). There is no name
@@ -183,6 +187,8 @@ var (
 		"GetConsoleOutputCP": true, "GetOEMCP": true, "MultiByteToWideChar": true, // decode what PowerShell printed
 		"SetConsoleMode":           true, // switch escape sequences on for sereno's own output
 		"GetUserDefaultUILanguage": true, // which language to speak (R5)
+		"LockFileEx":               true, // one sereno at a time writes the folder (R13) ...
+		"UnlockFileEx":             true, // ... and lets go of it again
 	}
 )
 

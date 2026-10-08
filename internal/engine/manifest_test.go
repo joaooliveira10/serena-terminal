@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/joaooliveira10/serena-terminal/internal/testenv"
 )
@@ -244,6 +246,68 @@ func TestLoadManifest(t *testing.T) {
 	}
 	if _, _, err := LoadManifest(root); err == nil {
 		t.Error("a corrupt manifest was accepted")
+	}
+
+	// A folder in the place of the manifest is an error, and at once: the
+	// patience for a file another sereno is just replacing is not for this.
+	if err := os.Remove(filepath.Join(root, ManifestName)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, ManifestName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if _, _, err := LoadManifest(root); err == nil {
+		t.Error("a folder was read as a manifest")
+	}
+	if elapsed := time.Since(start); elapsed > patience/2 {
+		t.Errorf("LoadManifest waited %s for a folder to become a file", elapsed)
+	}
+}
+
+// TestManifestRemembersWhereItCameFrom: a manifest knows which state of the
+// file it was read from, so that planning can tell when the file has been
+// written since (Request.Manifest). The state is not part of the encoding.
+func TestManifestRemembersWhereItCameFrom(t *testing.T) {
+	home := testenv.New(t)
+	root := filepath.Join(home.Dir, "root")
+	absent, _, err := LoadManifest(root)
+	if err != nil || !absent.origin.known || !absent.origin.absent {
+		t.Fatalf("origin of a manifest that is not there = %+v (%v)", absent.origin, err)
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := sampleManifest(home).Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ManifestName), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, _, err := LoadManifest(root)
+	if err != nil || loaded.origin != stateOf(data, false) {
+		t.Fatalf("origin = %+v (%v)", loaded.origin, err)
+	}
+	if again, err := loaded.Encode(); err != nil || !bytes.Equal(again, data) {
+		t.Errorf("the origin leaks into the encoding, or the round trip is not exact (%v)", err)
+	}
+	if NewManifest().origin.known || sampleManifest(home).origin.known {
+		t.Error("a manifest that was not read claims an origin")
+	}
+
+	// insertDir keeps parents in front of what is below them.
+	m := NewManifest()
+	deep := filepath.Join(home.Dir, "a", "b", "c")
+	m.addDir(deep)
+	m.addDir(filepath.Join(home.Dir, "x"))
+	m.insertDir(filepath.Join(home.Dir, "a"))
+	m.insertDir(filepath.Join(home.Dir, "a", "b"))
+	m.insertDir(filepath.Join(home.Dir, "z"))
+	m.insertDir(deep)
+	want := []string{filepath.Join(home.Dir, "a"), filepath.Join(home.Dir, "a", "b"), deep, filepath.Join(home.Dir, "x"), filepath.Join(home.Dir, "z")}
+	if !reflect.DeepEqual(m.Dirs, want) {
+		t.Errorf("dirs = %v\nwant %v", m.Dirs, want)
 	}
 }
 

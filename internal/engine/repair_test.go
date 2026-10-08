@@ -39,6 +39,28 @@ func stopBefore(n int) context.Context {
 	return &countdown{Context: context.Background(), left: n}
 }
 
+// A file can change under a plan at two moments, and they end differently.
+// Before the run has the lock, the plan is made again and found to be another
+// one: the run stops before its first write (see TestStalePlans and
+// TestChangeBeforeTheFirstWrite). Once the run has the lock, no other sereno
+// can change anything, but the user's editor, a scanner or a script can; that
+// is found when the operation's turn comes, in the middle of the run, and
+// then the manifest has to be corrected. The tests of this file are about
+// that second moment.
+
+// applyChanging carries a plan out as Apply does and calls change at the
+// moment the run holds the lock and has made its plan again. change stands
+// for a program that is not sereno and writes a file all the same.
+func applyChanging(t *testing.T, plan *Plan, change func()) error {
+	t.Helper()
+	fresh, release, err := plan.begin(context.Background())
+	if err != nil {
+		t.Fatalf("the run could not begin: %v", err)
+	}
+	change()
+	return fresh.carry(context.Background(), release, true)
+}
+
 // mustBeTrue fails the test when the manifest of the site says something the
 // disk does not bear out: an owned file with another hash than recorded, a
 // recorded directory or backup that does not exist, inserted bytes that are
@@ -95,15 +117,14 @@ func (s site) upgrade() Request {
 }
 
 // TestFailedApplyCanBeFinishedOrUndone: phase 2 fails on the first owned
-// file, because something changed it between the two phases. The files that
-// were never written must not count as edited afterwards.
+// file, because something changed it after the manifest was written. The
+// files that were never written must not count as edited afterwards.
 func TestFailedApplyCanBeFinishedOrUndone(t *testing.T) {
 	prepare := func(t *testing.T) site {
 		s := newSite(t, "")
 		mustApply(t, s.request("init v1\n"))
 		plan := mustPlan(t, s.upgrade())
-		put(t, s.init, "touched\n")
-		err := plan.Apply()
+		err := applyChanging(t, plan, func() { put(t, s.init, "touched\n") })
 		if !errors.Is(err, ErrChanged) {
 			t.Fatalf("Apply = %v, want ErrChanged", err)
 		}
@@ -154,8 +175,8 @@ func TestFailureAfterSomeFilesWereWritten(t *testing.T) {
 	s := newSite(t, "")
 	mustApply(t, s.request("init v1\n"))
 	plan := mustPlan(t, s.upgrade())
-	put(t, s.mode, "touched\n") // the second of the three files
-	if err := plan.Apply(); !errors.Is(err, ErrChanged) {
+	// The second of the three files.
+	if err := applyChanging(t, plan, func() { put(t, s.mode, "touched\n") }); !errors.Is(err, ErrChanged) {
 		t.Fatalf("Apply = %v, want ErrChanged", err)
 	}
 	if read(t, s.init) != "init v2\n" || read(t, s.outside) != "{}\n" {
@@ -192,8 +213,8 @@ func TestFailedFirstApply(t *testing.T) {
 	}
 	before := testenv.Snapshot(t, s.home.Dir)
 	plan := mustPlan(t, s.request("init v1\n"))
-	put(t, s.outside, "appeared in between\n") // where the last of the three files goes
-	if err := plan.Apply(); !errors.Is(err, ErrChanged) {
+	// Where the last of the three files goes.
+	if err := applyChanging(t, plan, func() { put(t, s.outside, "appeared in between\n") }); !errors.Is(err, ErrChanged) {
 		t.Fatalf("Apply = %v, want ErrChanged", err)
 	}
 	m := mustBeTrue(t, s)
@@ -235,9 +256,8 @@ func TestFailureBeforeTheManifest(t *testing.T) {
 		before := testenv.Snapshot(t, s.home.Dir)
 		plan := mustPlan(t, s.request("init v1\n"))
 		intruder := filepath.Join(s.home.LocalAppData, "Microsoft")
-		put(t, intruder, "a file where a folder should be\n")
 
-		err := plan.Apply()
+		err := applyChanging(t, plan, func() { put(t, intruder, "a file where a folder should be\n") })
 		var sandboxErr *SandboxError
 		if err == nil || errors.As(err, &sandboxErr) || errors.Is(err, ErrChanged) {
 			t.Fatalf("Apply = %v, want the failure of mkdir", err)
@@ -278,8 +298,7 @@ func TestFailedHookKeepsWhatWasCreated(t *testing.T) {
 		s, target, req := profileSite(t, "bash", []byte(original))
 		before := testenv.Snapshot(t, s.home.Dir)
 		plan := mustPlan(t, req)
-		put(t, target, "changed in between\n")
-		if err := plan.Apply(); !errors.Is(err, ErrChanged) {
+		if err := applyChanging(t, plan, func() { put(t, target, "changed in between\n") }); !errors.Is(err, ErrChanged) {
 			t.Fatalf("Apply = %v, want ErrChanged", err)
 		}
 		if read(t, target) != "changed in between\n" {
@@ -408,6 +427,62 @@ func TestInterruptedApplyAtEveryPoint(t *testing.T) {
 			sameTree(t, w.before, w.s.home.Dir, "after uninstall")
 		})
 	}
+}
+
+// TestChangeBeforeTheFirstWrite is the other moment: a file changes after
+// the plan was made and before the run has the lock. The plan is no longer
+// the plan of that folder, so nothing of it is carried out, the manifest is
+// not touched, and the directories the run made on its way to the lock are
+// taken away again.
+func TestChangeBeforeTheFirstWrite(t *testing.T) {
+	t.Run("an owned file was edited", func(t *testing.T) {
+		s := newSite(t, "")
+		mustApply(t, s.request("init v1\n"))
+		plan := mustPlan(t, s.upgrade())
+		put(t, s.mode, "touched\n")
+		tree := testenv.Snapshot(t, s.home.Dir)
+		err := plan.Apply()
+		if !errors.Is(err, ErrChanged) || !strings.Contains(err.Error(), s.mode) {
+			t.Errorf("Apply = %v, want ErrChanged for %s", err, s.mode)
+		}
+		sameTree(t, tree, s.home.Dir, "after the plan that was not carried out")
+	})
+
+	t.Run("a file appeared where a first apply writes", func(t *testing.T) {
+		s := newSite(t, "")
+		plan := mustPlan(t, s.request("init v1\n"))
+		put(t, s.outside, "appeared in between\n")
+		tree := testenv.Snapshot(t, s.home.Dir)
+		err := plan.Apply()
+		if !errors.Is(err, ErrChanged) || !strings.Contains(err.Error(), s.outside) {
+			t.Errorf("Apply = %v, want ErrChanged for %s", err, s.outside)
+		}
+		// ROOT and the two directories above it were created for the lock,
+		// and are gone again.
+		sameTree(t, tree, s.home.Dir, "after the plan that was not carried out")
+	})
+
+	t.Run("a profile was edited", func(t *testing.T) {
+		s, target, req := profileSite(t, "bash", []byte("export A=1\n"))
+		plan := mustPlan(t, req)
+		put(t, target, "changed in between\n")
+		tree := testenv.Snapshot(t, s.home.Dir)
+		err := plan.Apply()
+		if !errors.Is(err, ErrChanged) || errors.Is(err, ErrBusy) {
+			t.Errorf("Apply = %v, want ErrChanged", err)
+		}
+		sameTree(t, tree, s.home.Dir, "after the plan that was not carried out")
+	})
+
+	t.Run("an interrupt on the way to the lock", func(t *testing.T) {
+		s := newSite(t, "")
+		plan := mustPlan(t, s.request("init v1\n"))
+		// AppData, AppData\Local and ROOT are created, then the interrupt.
+		if err := plan.ApplyContext(stopBefore(3)); !errors.Is(err, context.Canceled) {
+			t.Fatalf("ApplyContext = %v", err)
+		}
+		sameTree(t, map[string]string{}, s.home.Dir, "after the interrupt")
+	})
 }
 
 // itoa avoids importing strconv for one small number.

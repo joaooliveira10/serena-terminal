@@ -75,6 +75,11 @@ const (
 	RuleSelection  = "e" // text against the selection background
 )
 
+// SubjectBlackOrWhite is the subject of the one measurement that is not about
+// a colour of the palette: the better of black and white on the selection
+// background (R9 e).
+const SubjectBlackOrWhite = "blackOrWhite"
+
 // Measurement is one contrast pair of the gate.
 type Measurement struct {
 	Rule    string  `json:"rule"`    // one of the Rule constants
@@ -173,7 +178,7 @@ func checkVariant(v Variant) VariantReport {
 	add(RuleSelection, "selectionForeground", "selectionBackground", Ratio(v.SelectionForeground, v.SelectionBackground), floor, false)
 	selection := Luminance(v.SelectionBackground)
 	bw := math.Max(contrast(blackLuminance, selection), contrast(whiteLuminance, selection))
-	add(RuleSelection, "blackOrWhite", "selectionBackground", bw, floor, false)
+	add(RuleSelection, SubjectBlackOrWhite, "selectionBackground", bw, floor, false)
 	return vr
 }
 
@@ -248,7 +253,7 @@ func (r Report) Markdown() string {
 	row("foreground", "foreground on background")
 	row("cursor", "cursor on background")
 	row("selectionForeground", "selection foreground on selection background")
-	row("blackOrWhite", "black or white on selection background")
+	row(SubjectBlackOrWhite, "black or white on selection background")
 
 	b.WriteString("\n## Roles\n\n")
 	b.WriteString("Everything above the emulator uses SGR parameters for the sixteen slots, never hex values and never a painted background.\n\n")

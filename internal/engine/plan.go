@@ -8,8 +8,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // Exit codes (R4).
@@ -72,9 +74,11 @@ func (n Note) Text(translate Translate) string {
 const (
 	NoteKept         = "plan.note.kept"
 	NoteEdited       = "plan.note.edited"
+	NoteReadOnly     = "plan.note.read-only"
 	NoteNotRegular   = "plan.note.not-regular"
 	NoteBackupOf     = "plan.note.backup-of"
 	NoteBackupKept   = "plan.note.backup-kept"
+	NoteBackupLine   = "plan.note.backup-kept-line"
 	NoteHookPresent  = "plan.note.hook-present"
 	NoteHookReplaces = "plan.note.hook-replaces"
 	NoteHookRemoved  = "plan.note.hook-removed"
@@ -200,6 +204,11 @@ type Request struct {
 	// Refusals found by the caller (an absent shell, a blocking execution
 	// policy) join those the engine finds.
 	Refusals []Refusal
+	// Manifest is the manifest the caller loaded to build this request, as
+	// LoadManifest returned it. Planning starts from it and stops with
+	// ErrBusy when the file on disk is no longer the one it was read from.
+	// nil reads the file when planning starts.
+	Manifest *Manifest
 }
 
 // Plan is the outcome of planning: the operations in the order they will be
@@ -212,6 +221,13 @@ type Plan struct {
 	// ledger is set on the plan of an apply: what Apply needs to correct the
 	// manifest when an operation fails.
 	ledger *ledger
+	// again makes the plan once more from the request it was made from, when
+	// the run holds the lock of ROOT (see ApplyContext). made lists the
+	// directories the run has created by then. nil for a plan that touches
+	// nothing sereno keeps a record of.
+	again func(made []string) (*Plan, error)
+	// manifest is the state of the manifest file the plan was made from.
+	manifest fileState
 }
 
 // Refused reports whether the plan must not be applied.
@@ -293,20 +309,98 @@ func (p *Plan) Apply() error { return p.ApplyContext(context.Background()) }
 // a file it was about to replace: that file then counts as edited (R15) until
 // it is deleted by hand. Files that were about to be created are not
 // affected; the next apply creates them.
+//
+// Two commands may run at the same time, and each of them plans before it
+// writes. A plan that changes something sereno keeps a record of is therefore
+// carried out under the lock of ROOT (see Lock), and under the lock it is
+// made once more: only then can no other sereno change what planning looks
+// at. The plan that is carried out is the new one, and it has to be the plan
+// that was shown. When it is not, nothing is written: the error is ErrBusy
+// when the manifest is another one than planning read (another sereno has
+// finished in between), as it is when another command holds the lock, and
+// ErrChanged with the path that differs when something else changed.
 func (p *Plan) ApplyContext(ctx context.Context) error {
 	if p.Refused() {
 		return ErrRefused
 	}
+	if p.again == nil || p.Changes() == 0 {
+		// Nothing to write, or nothing sereno keeps a record of.
+		return p.carry(ctx, nil, false)
+	}
+	fresh, release, err := p.begin(ctx)
+	if err != nil {
+		return err
+	}
+	return fresh.carry(ctx, release, true)
+}
+
+// begin takes the lock of ROOT and returns the plan to carry out under it:
+// p, made again. release gives the lock back.
+//
+// The lock is a file in ROOT, so the directories that lead to ROOT have to be
+// created before it can be taken; that is the one thing two first applies can
+// still do side by side. A directory that is there already when its turn
+// comes is no failure, and only the run that created it records it (see
+// settle for the run that then has to give up).
+//
+// The interrupt is asked about once for each of those directories and once
+// before the lock is taken; that last time stands for the first operation of
+// the plan that comes back.
+func (p *Plan) begin(ctx context.Context) (fresh *Plan, release func(), err error) {
+	var made []string // the directories above the lock that this run created
+	first := 0
+	for ; first < len(p.Ops) && p.aboveLock(p.Ops[first]); first++ {
+		if err = ctx.Err(); err == nil {
+			var created bool
+			if created, err = mkdirIfMissing(p.Ops[first].Path); created {
+				made = append(made, p.Ops[first].Path)
+			}
+		}
+		if err != nil {
+			p.settle(ctx, made, nil)
+			return nil, nil, err
+		}
+	}
+	if err = ctx.Err(); err == nil {
+		release, fresh, err = p.enter(first, made)
+	}
+	if err != nil {
+		p.settle(ctx, made, release)
+		return nil, nil, err
+	}
+	return fresh, release, nil
+}
+
+// carry performs the operations of a plan in order. release, when it is not
+// nil, gives back the lock of ROOT, which the run holds; carry calls it when
+// it is done, and earlier when ROOT itself is about to be removed, because
+// the lock file is in it. asked says that the interrupt was already asked
+// about for the first operation.
+func (p *Plan) carry(ctx context.Context, release func(), asked bool) error {
+	defer func() {
+		if release != nil {
+			release()
+		}
+	}()
 	var stayed []string // directories that could not be removed
 	for i, op := range p.Ops {
-		err := ctx.Err()
+		var err error
+		if i > 0 || !asked {
+			err = ctx.Err()
+		}
 		if err == nil {
+			if release != nil && op.act.kind == actRmdir && samePath(op.Path, p.Root) {
+				release()
+				release = nil
+			}
 			err = p.perform(op, &stayed)
 		}
 		if err == nil {
 			continue
 		}
-		if p.ledger != nil {
+		// Without the lock nothing was written that the manifest could be
+		// wrong about, and the manifest must not be written.
+		if p.ledger != nil && release != nil {
 			if repairErr := p.ledger.repair(p.Ops, i); repairErr != nil {
 				return fmt.Errorf("%w (and the manifest could not be corrected: %v)", err, repairErr)
 			}
@@ -314,6 +408,209 @@ func (p *Plan) ApplyContext(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// aboveLock reports whether an operation creates ROOT or a directory above
+// it: what has to be there before the lock can be taken.
+func (p *Plan) aboveLock(op Op) bool {
+	if op.act.kind != actMkdir {
+		return false
+	}
+	return samePath(op.Path, p.Root) || strings.HasPrefix(pathKey(p.Root), pathKey(op.Path)+string(filepath.Separator))
+}
+
+// mkdirIfMissing creates a directory above the lock and reports whether this
+// call created it. One that another sereno has created in the meantime is no
+// failure; anything else in its place is.
+func mkdirIfMissing(path string) (created bool, err error) {
+	err = Mkdir(path)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, fs.ErrExist) {
+		if info, statErr := os.Lstat(path); statErr == nil && info.IsDir() {
+			return false, nil
+		}
+	}
+	return false, err
+}
+
+// enter takes the lock of ROOT and makes the plan again. from is the number
+// of operations of p that are done already (the directories above the lock),
+// made the directories among them that this run created. The plan that comes
+// back is the one to carry out. When the error is not nil, release may still
+// be set: the caller has to settle and to let go.
+func (p *Plan) enter(from int, made []string) (release func(), fresh *Plan, err error) {
+	release, err = Lock(p.Root)
+	if isMissing(err) {
+		// ROOT is gone, although the plan counted on it or has just seen to
+		// it: an uninstall has finished in between.
+		err = ErrBusy
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	fresh, err = p.again(made)
+	switch {
+	case err != nil:
+	case fresh.manifest != p.manifest:
+		// Another sereno has written the manifest since this plan was made.
+		err = ErrBusy
+	default:
+		if path, differs := p.differs(fresh, from); differs {
+			err = fmt.Errorf("%s: %w", path, ErrChanged)
+		}
+	}
+	if err != nil {
+		return release, nil, err
+	}
+	return release, fresh, nil
+}
+
+// handOver bounds how long a run that has to give up waits for the lock in
+// order to leave word of the directories it created. The command that holds
+// the lock needs it for a handful of operations.
+const handOver = 5 * time.Second
+
+// settle looks after the directories a run created above the lock when the
+// run cannot go on: an operation failed, the run was interrupted, another
+// command holds the lock, or the folder is no longer what the plan was made
+// for. Such a run writes nothing else, but what it created must not be lost
+// track of. release gives back the lock when the run holds it.
+//
+// When there is a manifest, another command has got further, and the
+// directories are added to its record. Otherwise they are taken away again,
+// newest first, as far as they are empty. One that is not empty is in use:
+// another first apply has come through it on its own way to the lock. Then
+// this run waits for the lock and leaves word of what it created, in the
+// manifest that is there by then, or in one of its own that holds nothing
+// else; the command that finds it there makes its plan again.
+func (p *Plan) settle(ctx context.Context, made []string, release func()) {
+	version := ""
+	if p.ledger != nil {
+		version = p.ledger.next.Version
+	}
+	if release != nil {
+		recorded := len(made) > 0 && recordDirs(p.Root, made, false, version)
+		release()
+		if recorded {
+			return
+		}
+	}
+	for attempt := 0; attempt < 3 && len(made) > 0; attempt++ {
+		if made = removeEmpty(made); len(made) == 0 {
+			return
+		}
+		// ROOT may be gone for a moment, taken away by a run in the same
+		// position as this one: then there is no lock to be had, and the
+		// directories are looked at again.
+		if release := waitForLock(ctx, p.Root); release != nil {
+			recorded := recordDirs(p.Root, made, true, version)
+			release()
+			if recorded {
+				return
+			}
+		}
+	}
+}
+
+// removeEmpty removes the directories that are empty, newest first, and
+// returns the ones that are still there.
+func removeEmpty(dirs []string) []string {
+	var stay []string
+	for i := len(dirs) - 1; i >= 0; i-- {
+		RemoveEmptyDir(dirs[i])
+		if _, err := os.Lstat(dirs[i]); err == nil {
+			stay = append([]string{dirs[i]}, stay...)
+		}
+	}
+	return stay
+}
+
+// waitForLock takes the lock of ROOT, waiting for another command to let go
+// of it for as long as handOver and the context allow. It returns nil when
+// the lock is not to be had.
+func waitForLock(ctx context.Context, root string) (release func()) {
+	deadline := time.Now().Add(handOver)
+	for pause := time.Millisecond; ; pause = min(2*pause, 50*time.Millisecond) {
+		release, err := Lock(root)
+		if err == nil {
+			return release
+		}
+		if !errors.Is(err, ErrBusy) || !time.Now().Before(deadline) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(pause):
+		}
+	}
+}
+
+// differs compares p, from operation number from on, with fresh, a plan made
+// later from the same request: they must have the same lines for the user and
+// the same changes behind them. When they do not, path is the first path they
+// disagree about: the one that has an operation in one plan only, or another
+// operation in each.
+//
+// Two things may differ. Removals of directories are left out: whether a
+// directory will be empty is a matter of the moment on Windows (see
+// willBeEmpty), and removing one only when it is empty needs no agreement.
+// And the manifest may get other bytes: p counted every directory above the
+// lock as one it would create, while fresh knows which of them the run really
+// created.
+func (p *Plan) differs(fresh *Plan, from int) (path string, differs bool) {
+	if !reflect.DeepEqual(p.Refusals, fresh.Refusals) {
+		for _, refusal := range append(append([]Refusal{}, fresh.Refusals...), p.Refusals...) {
+			return refusal.Path, true
+		}
+	}
+	mine, theirs := withoutRmdir(p.Ops[from:]), withoutRmdir(fresh.Ops)
+	manifest := filepath.Join(p.Root, ManifestName)
+	for i := 0; i < len(mine) || i < len(theirs); i++ {
+		switch {
+		case i >= len(theirs):
+			return mine[i].Path, true
+		case i >= len(mine):
+			return theirs[i].Path, true
+		case !mine[i].same(theirs[i], samePath(mine[i].Path, manifest)):
+			// When p's operation comes later in fresh, the one fresh has in
+			// its place is new.
+			for _, later := range theirs[i+1:] {
+				if samePath(later.Path, mine[i].Path) && !samePath(theirs[i].Path, mine[i].Path) {
+					return theirs[i].Path, true
+				}
+			}
+			return mine[i].Path, true
+		}
+	}
+	return "", false
+}
+
+func withoutRmdir(ops []Op) []Op {
+	out := make([]Op, 0, len(ops))
+	for _, op := range ops {
+		if op.Verb != VerbRmdir {
+			out = append(out, op)
+		}
+	}
+	return out
+}
+
+// same reports whether two operations show the same line and make the same
+// change to a path that is in the same state. anyData leaves the bytes to be
+// written out of the comparison.
+func (o Op) same(other Op, anyData bool) bool {
+	if o.Verb != other.Verb || !samePath(o.Path, other.Path) || o.Incomplete != other.Incomplete ||
+		!reflect.DeepEqual(o.Note, other.Note) || !reflect.DeepEqual(o.Removed, other.Removed) || !reflect.DeepEqual(o.Added, other.Added) {
+		return false
+	}
+	a, b := o.act, other.act
+	if a.kind != b.kind || a.perm != b.perm || a.absent != b.absent || a.sum != b.sum {
+		return false
+	}
+	return anyData || bytes.Equal(a.data, b.data)
 }
 
 // perform carries out one operation. Directory removals are done here and
@@ -353,10 +650,15 @@ type ledger struct {
 // index failed stopped the run: the failed operation and all that would have
 // followed are taken out of the manifest the plan wanted, and the result is
 // written, provided the file is still what this run left there.
+//
+// An operation counts as carried out when the file it was to write is on
+// disk with exactly the bytes it was to get, whoever wrote them: what the
+// manifest says about that file is true, and taking it back would make a
+// file that is sereno's to the last byte look like one that is not.
 func (l *ledger) repair(ops []Op, failed int) error {
 	truth := l.next.clone()
 	for _, op := range ops[failed:] {
-		if op.undo != nil {
+		if op.undo != nil && !op.act.carriedOut(op.Path) {
 			op.undo(truth)
 		}
 	}
@@ -430,6 +732,9 @@ func (a action) run(path string) error {
 		return Mkdir(path)
 	case actWrite:
 		if err := a.verify(path); err != nil {
+			if a.carriedOut(path) {
+				return nil
+			}
 			return err
 		}
 		return WriteFile(path, a.data, a.perm)
@@ -455,6 +760,22 @@ func (a action) verify(path string) error {
 		return fmt.Errorf("%s: %w", path, ErrChanged)
 	}
 	return nil
+}
+
+// carriedOut reports whether the file a write is for already holds exactly
+// the bytes the write would give it. It is asked when the file is not in the
+// state planning saw: that is a change to stop for, unless the change is the
+// one that was wanted.
+func (a action) carriedOut(path string) bool {
+	if a.kind != actWrite {
+		return false
+	}
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	sum, err := HashFile(path)
+	return err == nil && sum == SHA256(a.data)
 }
 
 // isMissing reports whether err says that a path does not exist, including

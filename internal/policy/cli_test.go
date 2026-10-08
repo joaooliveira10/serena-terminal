@@ -316,13 +316,21 @@ func TestProgramDependencies(t *testing.T) {
 }
 
 // sandboxVariables are what must point into a temporary folder before a
-// built sereno is started by a script: the sandbox itself, sereno's folder,
-// and every variable a home directory, a Windows Terminal folder or a
-// profile is found through.
+// built sereno is started by a script: the sandbox itself, and every variable
+// a home directory, a Windows Terminal folder or a profile is found through.
 var sandboxVariables = []string{
-	"SERENO_SANDBOX", "SERENO_HOME", "HOME", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "XDG_DATA_HOME",
+	"SERENO_SANDBOX", "HOME", "USERPROFILE", "LOCALAPPDATA", "APPDATA",
 	"SERENO_PS_PROFILE_PATH", "SERENO_PWSH_PROFILE_PATH",
 }
+
+// rootVariables move sereno's folder away from its default place below
+// LOCALAPPDATA or HOME. A script that starts the program either points them
+// into the temporary folder as well, or makes sure they are not set: the
+// default folder then lies in the temporary folder, because LOCALAPPDATA and
+// HOME do. The first pass of each smoke script does the second, so that the
+// program is run the way a machine without those variables runs it (the
+// forms of R18 and R21 that name the folder through a variable).
+var rootVariables = []string{"SERENO_HOME", "XDG_DATA_HOME"}
 
 // TestTheBuiltProgramOnlyRunsInASandbox is the safety rule of the scripts
 // made structural: the program that `go build` produces is never started
@@ -361,13 +369,33 @@ func TestTheBuiltProgramOnlyRunsInASandbox(t *testing.T) {
 		t.Fatal("scripts/smoke.sh has no clean() in front of run()")
 	}
 	clean := shell[start:end]
-	if !strings.Contains(clean, "    env -i ") {
+	// The command itself: from `env -i` to the program it starts. Nothing of
+	// the caller reaches the program, so what is not named here is not set.
+	command := ""
+	if at := strings.Index(clean, "    env -i "); at >= 0 {
+		command = clean[at:]
+	} else {
 		t.Error("clean() of scripts/smoke.sh does not start from an empty environment (env -i)")
 	}
 	for _, name := range sandboxVariables {
-		if !regexp.MustCompile(`[ \t]` + name + `="\$(home|tmp|root)\b`).MatchString(clean) {
-			t.Errorf("clean() of scripts/smoke.sh does not point %s into the temporary folder", name)
+		if !regexp.MustCompile(`[ \t]` + name + `="\$(home|tmp)\b`).MatchString(command) {
+			t.Errorf("the env -i of scripts/smoke.sh does not point %s into the temporary folder", name)
 		}
+	}
+	// The variables that move sereno's folder: not in the command (the first
+	// pass runs without them), and into the temporary folder where they are
+	// put in front of it.
+	for _, name := range rootVariables {
+		if strings.Contains(command, name+"=") {
+			t.Errorf("the env -i of scripts/smoke.sh sets %s on every start; the first pass must run with the default folder", name)
+		}
+		set := regexp.MustCompile(`\b`+name+`=("?)([^ "]*)`).FindAllStringSubmatch(clean, -1)
+		if len(set) != 1 || !regexp.MustCompile(`^\$(home|root)\b`).MatchString(set[0][2]) {
+			t.Errorf("clean() of scripts/smoke.sh sets %s %d times, want once and into the temporary folder: %v", name, len(set), set)
+		}
+	}
+	if !strings.Contains(clean, `if [ -n "$moved" ]; then set -- `) || !regexp.MustCompile(`(?m)^root="?\$home/`).MatchString(shell) || regexp.MustCompile(`(?m)^root=["']?/`).MatchString(shell) {
+		t.Error("scripts/smoke.sh must set the folder variables only for a moved folder, and move the folder into the temporary home")
 	}
 	starts := 0
 	for _, line := range code(shell) {
@@ -397,9 +425,30 @@ func TestTheBuiltProgramOnlyRunsInASandbox(t *testing.T) {
 	// place.
 	power := read("scripts/smoke.ps1")
 	table := regexp.MustCompile(`(?s)\$sandbox = @\{.*?\n\}`).FindString(power)
+	inside := `\(?(\$userHome|\$local|\$tmp|Join-Path \$(userHome|local|tmp))`
 	for _, name := range sandboxVariables {
-		if !regexp.MustCompile(`(^|[\s;{])` + name + ` = \(?(\$userHome|\$local|\$tmp|Join-Path \$(userHome|local|tmp))`).MatchString(table) {
+		if !regexp.MustCompile(`(^|[\s;{])` + name + ` = ` + inside).MatchString(table) {
 			t.Errorf("the sandbox of scripts/smoke.ps1 does not point %s into the temporary folder", name)
+		}
+	}
+	// The variables that move sereno's folder are in the table as well, so
+	// that a value of the caller cannot reach the program. SERENO_HOME is
+	// taken out of the environment: the first pass runs with the default
+	// folder. XDG_DATA_HOME does not move the folder on Windows.
+	if !regexp.MustCompile(`(^|[\s;{])SERENO_HOME = \$null\b`).MatchString(table) {
+		t.Error("the sandbox of scripts/smoke.ps1 does not take SERENO_HOME out of the environment; the first pass must run with the default folder")
+	}
+	if !regexp.MustCompile(`(^|[\s;{])XDG_DATA_HOME = (\$null|` + inside + `)`).MatchString(table) {
+		t.Error("the sandbox of scripts/smoke.ps1 neither clears XDG_DATA_HOME nor points it into the temporary folder")
+	}
+	// Later the folder is moved once, with SERENO_HOME, into the temporary home.
+	moves := regexp.MustCompile(`(?m)^.*SetEnvironmentVariable\('SERENO_HOME'.*$`).FindAllString(power, -1)
+	if len(moves) != 1 || strings.TrimSpace(moves[0]) != "[Environment]::SetEnvironmentVariable('SERENO_HOME', $root)" {
+		t.Errorf("scripts/smoke.ps1 sets SERENO_HOME outside the table in another way than the one expected: %v", moves)
+	}
+	for _, assignment := range regexp.MustCompile(`(?m)^\s*\$root = .*$`).FindAllString(power, -1) {
+		if !regexp.MustCompile(`^\s*\$root = Join-Path \$(userHome|local) `).MatchString(assignment) {
+			t.Errorf("scripts/smoke.ps1 puts sereno's folder somewhere else than into the temporary home: %s", strings.TrimSpace(assignment))
 		}
 	}
 	applied := strings.Index(power, "foreach ($key in $sandbox.Keys) {")
@@ -411,8 +460,42 @@ func TestTheBuiltProgramOnlyRunsInASandbox(t *testing.T) {
 	if n := strings.Count(power, "& $binary "); n != 1 {
 		t.Errorf("scripts/smoke.ps1 starts the program in %d places, want the one inside Invoke-Sereno", n)
 	}
+	// The second way: several one right after the other, as processes of
+	// their own that inherit the environment the sandbox was put into. Like
+	// Invoke-Sereno it is a function, defined before the sandbox and called
+	// after it.
+	if n := strings.Count(power, "$start.FileName = $binary"); n != 1 || strings.Count(power, "FileName") != 1 {
+		t.Errorf("scripts/smoke.ps1 hands the program to a process in %d places, want the one inside Start-Together", n)
+	}
+	if strings.Contains(power, ".EnvironmentVariables") || strings.Contains(power, ".Environment[") || strings.Contains(power, "Start-Process") || strings.Contains(power, "Start-Job") {
+		t.Error("scripts/smoke.ps1 gives a process an environment of its own, or starts one in a way this test does not know")
+	}
+	if together := strings.Index(power, "Start-Together @("); applied < 0 || together < applied {
+		t.Error("scripts/smoke.ps1 starts the program several times before the sandbox is in the environment")
+	}
 	if strings.Contains(power, "& $program") || strings.Contains(power, "& $Sereno") {
 		t.Error("scripts/smoke.ps1 starts the program it was given instead of its copy")
+	}
+
+	// What running with the default folder is for: the forms of R18 and R21
+	// that name the folder through a variable are produced by the built
+	// program and compared, letter for letter.
+	for script, lines := range map[string][]string{
+		"scripts/smoke.ps1": {
+			`'if (Test-Path -LiteralPath "$env:LOCALAPPDATA\sereno\shell\init.ps1") { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook'`,
+			`'[ -r "$LOCALAPPDATA/sereno/shell/init.bash" ] && . "$LOCALAPPDATA/sereno/shell/init.bash" # sereno:hook'`,
+			`'fragment\auto-soft.json'`,
+		},
+		"scripts/smoke.sh": {
+			`'[ -r "$HOME/.local/share/sereno/shell/init.bash" ] && . "$HOME/.local/share/sereno/shell/init.bash" # sereno:hook'`,
+		},
+	} {
+		text := read(script)
+		for _, line := range lines {
+			if !strings.Contains(text, line) {
+				t.Errorf("%s does not compare what the program writes for the default folder with %s", script, line)
+			}
+		}
 	}
 
 	// The wrappers build the program and hand it over; they never run it.

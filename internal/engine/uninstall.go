@@ -17,6 +17,9 @@ type UninstallRequest struct {
 	// shells (`sereno uninstall --hook LIST`): the manifest is updated and
 	// everything else stays.
 	Shells []string
+	// Manifest is the manifest the caller loaded and decided on, as
+	// LoadManifest returned it; see Request.Manifest.
+	Manifest *Manifest
 }
 
 // remover collects the operations of an uninstall.
@@ -45,20 +48,46 @@ const glance = 300 * time.Millisecond
 //  3. the mode file and the manifest are deleted, then backups/, the
 //     directories sereno created (newest first) and ROOT, each only if empty.
 //
-// Without a manifest there is nothing to do and the plan is empty.
+// Without a manifest there is nothing to do and the plan is empty. The plan
+// has a refusal, and must not be applied, when something that is not sereno's
+// has the name of the lock file in ROOT (see Lock).
+//
+// The error is ErrBusy when another sereno is writing the folder, or has
+// written it since the caller read the manifest it passes in the request.
 func PlanUninstall(req UninstallRequest) (*Plan, error) {
 	if !filepath.IsAbs(req.Root) {
 		return nil, fmt.Errorf("plan: root %q is not an absolute path", req.Root)
 	}
-	old, found, err := LoadManifest(req.Root)
+	return confirmed(req.Root, func([]string) (*Plan, error) { return planUninstall(req) })
+}
+
+// planUninstall is PlanUninstall for a request that has been validated.
+func planUninstall(req UninstallRequest) (*Plan, error) {
+	current, state, err := readManifestFile(req.Root)
 	if err != nil {
 		return nil, err
 	}
-	plan := &Plan{Root: req.Root}
-	if !found {
+	old := req.Manifest
+	switch {
+	case old == nil || !old.origin.known:
+		if old, err = manifestFrom(current, state); err != nil {
+			return nil, err
+		}
+	case old.origin != state:
+		return nil, ErrBusy
+	}
+	plan := &Plan{Root: req.Root, manifest: state}
+	if state.absent {
 		return plan, nil
 	}
+	if lockInTheWay(req.Root) {
+		// The one refusal an uninstall knows: it could not take the lock.
+		plan.Refusals = []Refusal{{Path: filepath.Join(req.Root, LockName), Reason: NewNote(ReasonForeign)}}
+	}
 	u := &remover{root: req.Root, gone: map[string]bool{}, kept: map[string]bool{}}
+	// The lock file is in ROOT while a command writes, this one included; it
+	// is gone before ROOT is removed (see Plan.carry).
+	u.gone[pathKey(filepath.Join(req.Root, LockName))] = true
 	next := old.clone()
 	only := map[string]bool{}
 	for _, shell := range req.Shells {
@@ -75,10 +104,6 @@ func PlanUninstall(req UninstallRequest) (*Plan, error) {
 	}
 
 	manifestPath := filepath.Join(req.Root, ManifestName)
-	current, err := os.ReadFile(manifestPath)
-	if err != nil {
-		return nil, fmt.Errorf("read manifest: %w", err)
-	}
 	if len(only) > 0 {
 		next.Version = req.Version
 		data, err := next.Encode()
@@ -86,9 +111,12 @@ func PlanUninstall(req UninstallRequest) (*Plan, error) {
 			return nil, err
 		}
 		if !bytes.Equal(current, data) {
-			u.ops = append(u.ops, Op{Verb: VerbReplace, Path: manifestPath, act: writeOver(data, FilePerm, SHA256(current))})
+			u.ops = append(u.ops, Op{Verb: VerbReplace, Path: manifestPath, act: writeOver(data, FilePerm, state.sum)})
 		}
 		plan.Ops = u.ops
+		if err := stillAt(req.Root, state); err != nil {
+			return nil, err
+		}
 		return plan, nil
 	}
 
@@ -115,7 +143,7 @@ func PlanUninstall(req UninstallRequest) (*Plan, error) {
 			u.remove(modePath, action{kind: actRemove, absent: false, sum: hashOrEmpty(modePath)}, Note{}, nil)
 		}
 	}
-	u.remove(manifestPath, action{kind: actRemove, sum: SHA256(current)}, Note{}, nil)
+	u.remove(manifestPath, action{kind: actRemove, sum: state.sum}, Note{}, nil)
 	u.rmdir(filepath.Join(req.Root, BackupsDir))
 	for i := len(old.Dirs) - 1; i >= 0; i-- {
 		u.rmdir(old.Dirs[i])
@@ -123,6 +151,9 @@ func PlanUninstall(req UninstallRequest) (*Plan, error) {
 	u.rmdir(req.Root)
 
 	plan.Ops = u.ops
+	if err := stillAt(req.Root, state); err != nil {
+		return nil, err
+	}
 	return plan, nil
 }
 
@@ -227,12 +258,15 @@ func (u *remover) owned(path, recorded string) error {
 // a hook-only uninstall, so that a later run can finish the job.
 func (u *remover) hook(record HookRecord) bool {
 	backup, haveBackup := readBackup(record)
-	keepBackup := func() {
+	// keepBackup reports a backup that stays, with the reason: the profile is
+	// not what it was before the hook (NoteBackupKept), or the line could
+	// not be taken out of it at all (NoteBackupLine).
+	keepBackup := func(why string) {
 		if record.Backup == "" {
 			return
 		}
 		if _, err := os.Lstat(record.Backup); err == nil {
-			u.leave(Op{Verb: VerbKeep, Path: record.Backup, Note: NewNote(NoteBackupKept, record.Path)})
+			u.leave(Op{Verb: VerbKeep, Path: record.Backup, Note: NewNote(why, record.Path)})
 		}
 	}
 
@@ -240,7 +274,7 @@ func (u *remover) hook(record HookRecord) bool {
 	// the lines the user may want to delete by hand.
 	skip := func(reason Note, lines []string) bool {
 		u.leave(Op{Verb: VerbSkip, Path: record.Path, Note: reason, Removed: lines, Incomplete: true})
-		keepBackup()
+		keepBackup(NoteBackupLine)
 		return false
 	}
 
@@ -261,7 +295,7 @@ func (u *remover) hook(record HookRecord) bool {
 		if record.FileCreated {
 			u.rmdirs(record.DirsCreated)
 		} else {
-			keepBackup()
+			keepBackup(NoteBackupKept)
 		}
 		return true
 	}
@@ -289,7 +323,7 @@ func (u *remover) hook(record HookRecord) bool {
 		return true
 	}
 	if !restored {
-		keepBackup()
+		keepBackup(NoteBackupKept)
 		return true
 	}
 	if info, err := os.Lstat(record.Backup); err == nil && info.Mode().IsRegular() {
