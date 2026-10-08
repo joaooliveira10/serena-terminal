@@ -27,10 +27,14 @@
 # On Windows it then hands over to scripts/bench.sh for bash when Git Bash is
 # installed.
 #
-# Budgets on the owner's machine: 80 ms (Serena profile session), 65 ms (hook
-# session) and 2 ms (prompt). When the variable CI is set, or with -Ci:
+# Budgets on the maintainer's machine: 80 ms (Serena profile session), 65 ms
+# (hook session) and 2 ms (prompt). When the variable CI is set, or with -Ci:
 # 150 ms, 150 ms and 10 ms. The exit code is 1 when a budget is not met or a
 # measurement could not be made.
+#
+# The local budgets are judged on an idle machine: with other work running, a
+# median over 80 ms says nothing about init.ps1. Run this script again alone
+# before reading a failure as a regression.
 #
 # Everything is rendered into, and run from, a temporary folder that is
 # removed at the end. The children get that folder as their home; PSReadLine
@@ -294,6 +298,10 @@ $c = [Globalization.CultureInfo]::InvariantCulture
     }
 }
 
-if ($failed) { Write-Output 'sereno bench: a budget was not met, or a measurement could not be made'; exit 1 }
+if ($failed) {
+    Write-Output 'sereno bench: a budget was not met, or a measurement could not be made'
+    if (-not $loose) { Write-Output 'sereno bench: the local budgets are for an idle machine; run this again with nothing else running before reading it as a regression' }
+    exit 1
+}
 Write-Output 'sereno bench: all budgets met'
 exit 0

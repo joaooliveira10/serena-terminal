@@ -22,7 +22,7 @@ Screenshots will be added to `docs/images` after that acceptance test; there are
 
 ## What it writes, and where
 
-`sereno apply --dry-run` prints the plan and changes nothing. This is its output on a Windows 11 machine that has Windows Terminal, from a real run in a test home folder (that folder is shown as the home of a user named `user`; `dev` is the version of a build that is not a release):
+`sereno apply --dry-run` prints the plan and changes nothing. This is its output on a Windows 11 machine that has Windows Terminal, from a real run in a test home folder (that folder is shown as the home of a user named `user`; `dev` is the version of a program that does not come from a release archive):
 
 ```text
 sereno dev: plan
@@ -103,6 +103,8 @@ Available once the tag `v0.1.0` exists:
 go install github.com/joaooliveira10/serena-terminal/cmd/sereno@v0.1.0
 ```
 
+A program installed this way reports its version as `dev`: the tag is stamped only into the programs of the release archives.
+
 ### From a release archive
 
 Available once the first release exists. A release has one archive per system, named `sereno_<version>_<os>_<arch>.zip` for Windows and `.tar.gz` for macOS (`darwin`) and Linux, for `amd64` and `arm64`. Each holds the program, `LICENSE` and `README.md`. `checksums.txt` lists the SHA-256 of the six archives: compare it with what `Get-FileHash` (Windows), `sha256sum` (Linux) or `shasum -a 256` (macOS) prints for your download. The release also carries an attestation of where the files were built, which the GitHub command line checks:
@@ -145,7 +147,9 @@ For every command: `--lang en|pt-BR` chooses the language of the messages (other
 
 ### apply
 
-Writes the files of the plan. It can be run again at any time; a second run finds everything as wanted:
+Writes the files of the plan, and ends by saying what comes next. On Windows with Windows Terminal: "Open a new Windows Terminal window and choose Serena in the new-tab menu. If it is not listed, close every Windows Terminal window and open it again." That step has not been tried on a real machine yet (see Status). On macOS and Linux: "Nothing loads these files yet. To use them, let sereno add one line to your shell's start-up file: `sereno apply --hook bash` (or zsh, pwsh)."
+
+The command can be run again at any time; a second run finds everything as wanted:
 
 ```sh
 sereno apply
@@ -323,7 +327,7 @@ sereno version
 sereno dev (windows/amd64)
 ```
 
-A release prints its tag in the place of `dev`.
+A program from a release archive prints its tag in the place of `dev`.
 
 ### help
 

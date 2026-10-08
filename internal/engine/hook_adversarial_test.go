@@ -14,7 +14,7 @@ import (
 // This file holds the hook editor's hostile cases: profiles in every shape a
 // user's editor leaves them in, what users do to the hook line afterwards,
 // and lines of the user's own that merely mention the marker. They were
-// written by the independent review of stage 1 and moved here.
+// added by an independent review of the hook editor.
 
 // describe renders a plan for failure messages, with note keys instead of
 // translated texts.

@@ -68,7 +68,7 @@ Something was left as it is: see the skip lines above. sereno did not edit or de
 Done.
 ```
 
-After a complete uninstall the record is gone, so what was left is yours to remove: running the command again finds nothing. The same holds for a file you marked read-only.
+After a complete uninstall the record is gone, so what was left is yours to remove: running the command again finds nothing. A file you only marked read-only, without changing it, is not such a case: it is still what sereno wrote, and uninstall deletes it.
 
 There is one exception. The settings file `mode` is always deleted, also when you edited it. `sereno status` says so in its `owned.modified` warning.
 
@@ -105,7 +105,7 @@ What that means in practice. This paragraph describes Windows Terminal's side as
 
 ### The program
 
-Uninstall does not delete the sereno program; it prints where it is. If the install script of a release placed it, it is in the `bin` folder of sereno's own folder, which `apply` and `uninstall` never touch, and uninstall says that the folder was left alone. Remove it with the same script (`install.ps1 -Uninstall`, or `sh install.sh --uninstall`), which also removes `bin` and sereno's folder when they are empty, or delete the file. Run `sereno uninstall` first: the script refuses to remove the program while `manifest.json` says sereno is still applied.
+Uninstall does not delete the sereno program; it prints where it is. If the install script of a release placed it, it is in the `bin` folder of sereno's own folder, which `apply` and `uninstall` never touch, and uninstall says that the folder was left alone. Remove it with the same script (`install.ps1 -Uninstall`, or `sh install.sh --uninstall`), which also removes `bin` and sereno's folder when they are empty, or delete the file. Folders above sereno's own folder that the script had to create (on a home that had no `~/.local`: `~/.local` and `~/.local/share`) stay. The script keeps no record of them, and `sh install.sh --uninstall` says so when it leaves one empty; `sereno uninstall` leaves them too when the script was there first, because sereno removes only the folders it created itself. Run `sereno uninstall` first: the script refuses to remove the program while `manifest.json` says sereno is still applied.
 
 ### What sereno never recorded
 

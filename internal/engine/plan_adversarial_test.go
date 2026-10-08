@@ -16,9 +16,9 @@ import (
 	"github.com/joaooliveira10/serena-terminal/internal/testenv"
 )
 
-// More cases from the independent review of stage 1: profiles at the size
-// limit, read-only profiles, the permission bits of backups, ROOT spelled in
-// another letter case, and the bytes of a manifest that holds everything.
+// More cases added by an independent review of the engine: profiles at the
+// size limit, read-only profiles, the permission bits of backups, ROOT spelled
+// in another letter case, and the bytes of a manifest that holds everything.
 
 // filler returns exactly n bytes of comment lines that end with a newline.
 func filler(n int) []byte {

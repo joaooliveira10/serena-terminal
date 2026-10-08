@@ -19,6 +19,11 @@
 # setting. It does not ask for more rights (no sudo) and does not start the
 # program. LICENSE and README.md of the archive are not unpacked.
 #
+# --uninstall removes the program, then the bin folder and sereno's own folder
+# when they are empty. Folders above sereno's own that the first run had to
+# create (on a home without ~/.local: ~/.local and ~/.local/share) stay: this
+# script keeps no record of them, and says so when it leaves one empty.
+#
 # SERENO_INSTALL_FROM=DIR takes the archive from the folder DIR instead of
 # downloading it: for a machine without a network, and for the tests of this
 # script. The checksum is compared all the same.
@@ -116,7 +121,17 @@ if [ "$action" = uninstall ]; then
         if rmdir "$bin" 2> /dev/null; then say "Removed $bin"; else say "$bin was left: it holds other files."; fi
     fi
     if [ -d "$root" ]; then
-        if rmdir "$root" 2> /dev/null; then say "Removed $root"; else say "$root was left: it holds other files."; fi
+        if rmdir "$root" 2> /dev/null; then
+            say "Removed $root"
+            # What is above sereno's own folder is not judged here: nothing
+            # records which of those folders a first run had to create.
+            above=${root%/*}
+            if [ -d "$above" ] && [ -z "$(ls -A "$above" 2> /dev/null)" ]; then
+                say "$above was left, although it is empty now: this script keeps no record of the folders above sereno's own, so it cannot tell whether it created them. Remove them yourself if nothing else uses them."
+            fi
+        else
+            say "$root was left: it holds other files."
+        fi
     fi
     exit 0
 fi

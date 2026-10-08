@@ -196,10 +196,15 @@ try {
         Confirm $same 'the installed init files are the rendered ones, byte for byte'
     }
     # The fragment of a default folder names init.ps1 through %LOCALAPPDATA%
-    # (R18): it is the same file on every machine, and the golden one.
+    # (R18), so one fact of the machine is all it depends on: `--shell auto`
+    # takes PowerShell 7 where pwsh.exe is on PATH and Windows PowerShell 5.1
+    # where it is not. The program had the PATH of this script, so the same
+    # question is asked here, and the fragment is one of two golden files.
     $golden = Join-Path $repo 'testdata\golden'
     if ($Rendered) { $golden = $Rendered }
-    Confirm ((Get-FileHash -LiteralPath $fragment -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath (Join-Path $golden 'fragment\auto-soft.json') -Algorithm SHA256).Hash) 'the fragment of the default folder is fragment\auto-soft.json, byte for byte'
+    $wantedFragment = 'fragment\auto-soft.json'
+    if (Get-Command pwsh.exe -CommandType Application -ErrorAction SilentlyContinue) { $wantedFragment = 'fragment\pwsh.json' }
+    Confirm ((Get-FileHash -LiteralPath $fragment -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath (Join-Path $golden $wantedFragment) -Algorithm SHA256).Hash) "the fragment of the default folder is $wantedFragment, byte for byte"
     $applied = Get-Tree $userHome
 
     $out = Invoke-Sereno @('apply', '--lang', 'en')

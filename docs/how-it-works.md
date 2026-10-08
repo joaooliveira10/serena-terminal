@@ -160,7 +160,7 @@ Every command that writes works in two phases. First it computes every operation
 
 - A file that is in the way and is not in the manifest is not sereno's: apply refuses.
 - A file in the manifest whose content is still what sereno wrote is replaced when a newer version differs, and otherwise kept.
-- A file in the manifest that you edited, or marked read-only, is left alone and reported (exit code 4).
+- A file in the manifest that you edited, or that is read-only when it would be replaced, is left alone and reported (exit code 4).
 - A file in the manifest that is gone is written again.
 
 One sereno at a time writes a folder. While a command writes, it holds an operating-system lock on an empty file named `lock` in sereno's folder, and it computes its plan once more under that lock. A second command that arrives in that moment writes nothing and ends with exit code 1 and the sentence "another sereno is working on this folder; run the command again when it has finished". The lock ends with the process that holds it. A command that is killed can leave the empty file behind; the next command that writes takes it away. `sereno status` takes no lock and may, for a moment, describe an installation that another command is half way through writing.

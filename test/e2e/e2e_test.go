@@ -898,9 +898,10 @@ func TestUninstallOneHook(t *testing.T) {
 	}
 }
 
-// TestFolderTheProfileCannotName is the case stage 2 handed over: a ROOT
-// with %NAME% in it cannot stand in the command line of the Serena profile
-// (R18). apply refuses with exit code 3 and names --no-profile, which works.
+// TestFolderTheProfileCannotName is a case the review of the renderer handed
+// over: a ROOT with %NAME% in it cannot stand in the command line of the
+// Serena profile (R18). apply refuses with exit code 3 and names
+// --no-profile, which works.
 func TestFolderTheProfileCannotName(t *testing.T) {
 	s := newSite(t, machines[0], "wt-present")
 	s.vars[platform.EnvHome] = filepath.Join(s.home.Dir, "%USERNAME%", "sereno")

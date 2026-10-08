@@ -577,8 +577,8 @@ func TestMessageKeysExist(t *testing.T) {
 
 // TestMessageKeyScan pins what the scan takes for a key and what it leaves
 // alone. The strings that look like keys and are not (a program, a file)
-// matter: stage 1 took "pwsh.exe" for a key as soon as a key "pwsh.absent"
-// existed.
+// matter: an earlier scan took "pwsh.exe" for a key as soon as a key
+// "pwsh.absent" existed.
 func TestMessageKeyScan(t *testing.T) {
 	const sample = `package sample
 

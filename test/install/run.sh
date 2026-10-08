@@ -342,10 +342,24 @@ arguments=
 attempt
 arguments=--uninstall
 attempt
-[ "$code" -eq 0 ] && said "Removed $root/bin/sereno" && said "Removed $root/bin" && said "Removed $root" && [ ! -e "$root" ] && [ -d "$home/.local/share" ]
-report $? '--uninstall removes the program, its bin folder and the empty folder of sereno; the folders above stay'
+[ "$code" -eq 0 ] && said "Removed $root/bin/sereno" && said "Removed $root/bin" && said "Removed $root" && [ ! -e "$root" ] && [ -d "$home/.local/share" ] &&
+    said "$home/.local/share was left, although it is empty now"
+report $? '--uninstall removes the program, its bin folder and the empty folder of sereno; the folders above stay, and it says so'
 [ "$(find "$home" -type f | wc -l | tr -d ' ')" = 0 ] && tidy
 report $? 'after it the home holds no file'
+
+# The sentence is for a folder this run left empty, and for nothing else.
+arguments=
+attempt
+printf 'mine\n' > "$home/.local/share/notes.txt"
+arguments=--uninstall
+attempt
+[ "$code" -eq 0 ] && [ ! -e "$root" ] && [ "$(cat "$home/.local/share/notes.txt")" = mine ] && ! said 'was left'
+first=$?
+rm "$home/.local/share/notes.txt"
+attempt
+[ "$first" -eq 0 ] && [ "$code" -eq 0 ] && said 'Nothing to remove' && ! said 'was left' && [ -d "$home/.local/share" ]
+report $? '--uninstall says nothing about a folder above that holds something else, nor when it removed no folder'
 arguments=
 
 # ---------------------------------------------------------------------------

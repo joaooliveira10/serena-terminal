@@ -29,7 +29,10 @@
 #      the network (a good archive, a corrupted one, a missing checksum line,
 #      a second run, the removal);
 #   7. with -Bench, the budgets of scripts\bench.ps1, which goes on to
-#      scripts\bench.sh for bash;
+#      scripts\bench.sh for bash. The local budgets are judged on an idle
+#      machine: with other work running, a median over 80 ms says nothing
+#      about init.ps1. Run -Bench again alone before reading a failure as a
+#      regression;
 #   8. the listings of step 1 again: any difference fails the run.
 #
 # The program and the shells never see the real home: they are started with

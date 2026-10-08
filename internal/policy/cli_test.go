@@ -479,12 +479,16 @@ func TestTheBuiltProgramOnlyRunsInASandbox(t *testing.T) {
 
 	// What running with the default folder is for: the forms of R18 and R21
 	// that name the folder through a variable are produced by the built
-	// program and compared, letter for letter.
+	// program and compared, letter for letter. The fragment is one of two
+	// files: `--shell auto` takes PowerShell 7 where pwsh.exe is on PATH, as
+	// it is on the Windows runners of CI, so the script has to ask the same
+	// question and must know both.
 	for script, lines := range map[string][]string{
 		"scripts/smoke.ps1": {
 			`'if (Test-Path -LiteralPath "$env:LOCALAPPDATA\sereno\shell\init.ps1") { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook'`,
 			`'[ -r "$LOCALAPPDATA/sereno/shell/init.bash" ] && . "$LOCALAPPDATA/sereno/shell/init.bash" # sereno:hook'`,
 			`'fragment\auto-soft.json'`,
+			`if (Get-Command pwsh.exe -CommandType Application -ErrorAction SilentlyContinue) { $wantedFragment = 'fragment\pwsh.json' }`,
 		},
 		"scripts/smoke.sh": {
 			`'[ -r "$HOME/.local/share/sereno/shell/init.bash" ] && . "$HOME/.local/share/sereno/shell/init.bash" # sereno:hook'`,

@@ -22,7 +22,7 @@ As capturas de tela entram em `docs/images` depois desse teste de aceitação; p
 
 ## O que ele grava, e onde
 
-O `sereno apply --dry-run` mostra o plano e não altera nada. Esta é a saída dele num Windows 11 com Windows Terminal, numa execução real em uma pasta pessoal de teste (essa pasta aparece como a pasta pessoal de um usuário chamado `user`; `dev` é a versão de uma compilação que não é uma release):
+O `sereno apply --dry-run` mostra o plano e não altera nada. Esta é a saída dele num Windows 11 com Windows Terminal, numa execução real em uma pasta pessoal de teste (essa pasta aparece como a pasta pessoal de um usuário chamado `user`; `dev` é a versão de um programa que não veio de um arquivo de release):
 
 ```text
 sereno dev: plan
@@ -103,6 +103,8 @@ Disponível quando a tag `v0.1.0` existir:
 go install github.com/joaooliveira10/serena-terminal/cmd/sereno@v0.1.0
 ```
 
+Um programa instalado assim informa a versão como `dev`: a tag só é gravada nos programas dos arquivos de release.
+
 ### A partir de um arquivo de release
 
 Disponível quando a primeira release existir. Uma release tem um arquivo compactado por sistema, com o nome `sereno_<version>_<os>_<arch>.zip` para Windows e `.tar.gz` para macOS (`darwin`) e Linux, para `amd64` e `arm64`. Cada um contém o programa, o `LICENSE` e o `README.md`. O `checksums.txt` traz o SHA-256 dos seis arquivos: compare com o que o `Get-FileHash` (Windows), o `sha256sum` (Linux) ou o `shasum -a 256` (macOS) mostram para o arquivo que você baixou. A release também traz um atestado de onde os arquivos foram compilados, que a linha de comando do GitHub confere:
@@ -145,7 +147,9 @@ Em todos os comandos: `--lang en|pt-BR` escolhe o idioma das mensagens (sem ela,
 
 ### apply
 
-Grava os arquivos do plano. Pode ser rodado de novo a qualquer momento; a segunda execução encontra tudo como desejado:
+Grava os arquivos do plano e termina dizendo o que vem em seguida. No Windows com Windows Terminal: "Abra uma nova janela do Windows Terminal e escolha Serena no menu de nova aba. Se ele não aparecer na lista, feche todas as janelas do Windows Terminal e abra de novo." Esse passo ainda não foi experimentado numa máquina de verdade (veja Situação). No macOS e no Linux: "Nada carrega esses arquivos ainda. Para usá-los, deixe o sereno adicionar uma linha ao arquivo de inicialização do seu shell: `sereno apply --hook bash` (ou zsh, pwsh)."
+
+O comando pode ser rodado de novo a qualquer momento; a segunda execução encontra tudo como desejado:
 
 ```sh
 sereno apply
@@ -323,7 +327,7 @@ sereno version
 sereno dev (windows/amd64)
 ```
 
-Uma release mostra a tag dela no lugar de `dev`.
+Um programa que vem de um arquivo de release mostra a tag da release no lugar de `dev`.
 
 ### help
 

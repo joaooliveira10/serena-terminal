@@ -86,7 +86,9 @@ A hook line that was asked for once is checked again by every later `sereno appl
 
 ### Files you edit or protect
 
-A file sereno wrote and that you then edited, or marked read-only, is left as it is on every system, by `apply` and by `uninstall`, and reported with exit code 4. The one exception is the settings file `mode`: `uninstall` deletes it even when it was edited. `sereno status` lists such files under `owned.modified`.
+A file sereno wrote and that you then edited is left as it is on every system, by `apply` and by `uninstall`, and reported with exit code 4. The one exception is the settings file `mode`: `uninstall` deletes it even when it was edited. `sereno status` lists such files under `owned.modified`.
+
+A file of sereno's that you marked read-only without changing it is left alone by `apply` and `theme` when they would replace it (exit code 4); `uninstall` removes it, because it is still what sereno wrote.
 
 ## Not part of 0.1
 
