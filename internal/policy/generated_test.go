@@ -252,7 +252,7 @@ func TestScriptsStartShellsWithoutProfiles(t *testing.T) {
 	seen := make([]int, len(rules))
 	root := testenv.RepoRoot(t)
 	scripts := 0
-	for _, dir := range []string{"scripts", "test/shell"} {
+	for _, dir := range []string{"scripts", "test/shell", "test/install"} {
 		err := filepath.WalkDir(filepath.Join(root, filepath.FromSlash(dir)), func(path string, entry fs.DirEntry, err error) error {
 			if err != nil || entry.IsDir() {
 				return err
@@ -292,8 +292,8 @@ func TestScriptsStartShellsWithoutProfiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if scripts < 7 {
-		t.Errorf("only %d scripts found under scripts/ and test/shell/", scripts)
+	if scripts < 12 {
+		t.Errorf("only %d scripts found under scripts/, test/shell/ and test/install/", scripts)
 	}
 	for i, rule := range rules {
 		if seen[i] < rule.atLeast {

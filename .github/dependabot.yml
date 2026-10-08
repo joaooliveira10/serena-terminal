@@ -1,0 +1,14 @@
+# The workflows pin every action to a commit. Dependabot proposes the newer
+# commit, with the version in the comment next to it, once a week, and only
+# for a release that has been out for seven days.
+#
+# The Go module has no dependencies (go.mod has no require lines), so there is
+# nothing else to keep up to date.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

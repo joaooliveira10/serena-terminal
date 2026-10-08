@@ -1,0 +1,145 @@
+# The release of Serena Terminal (requirement R41 of docs/spec-0.1.md).
+#
+# A tag v* starts it. Two jobs, each with the rights it needs and no more:
+#
+#   build     reads the repository, refuses a tag that is not a version, runs
+#             the tests, builds the six programs and packs the release folder
+#             (scripts/release.sh): six archives, checksums.txt, install.ps1
+#             and install.sh. It may write nowhere.
+#   publish   never checks the repository out and runs no code of it. It
+#             takes the folder of the first job, has GitHub attest where the
+#             files were built, and creates a DRAFT release with them.
+#
+# The draft is not visible to others and is not what users download until the
+# owner has looked at it and published it by hand. No secret is used: the
+# token is the one GitHub gives every run, and the signing key of the
+# attestation is issued for this one run.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Nothing by default; each job names its own.
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  build:
+    name: Build the release folder
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.x'
+          cache: false
+
+      # vMAJOR.MINOR.PATCH, optionally with a pre-release part: what
+      # `go install .../cmd/sereno@<tag>` accepts (R40). Anything else that
+      # starts with v ends here, before a file is built.
+      - name: The tag must be a version
+        run: go run ./internal/tools/release --version "$GITHUB_REF_NAME" --check
+
+      - name: go vet and go test
+        run: |
+          go vet ./...
+          go test ./... -count=1
+
+      - name: Build the release folder
+        run: sh scripts/release.sh "$GITHUB_REF_NAME" dist
+
+      - name: Six archives, their checksums and two install scripts
+        working-directory: dist
+        run: |
+          ls -l
+          test "$(ls | wc -l)" -eq 9
+          test "$(wc -l < checksums.txt)" -eq 6
+          sha256sum --check checksums.txt
+          grep --quiet --fixed-strings --line-regexp "version='$GITHUB_REF_NAME'" install.sh
+          grep --quiet --fixed-strings --line-regexp "\$version = '$GITHUB_REF_NAME'" install.ps1
+
+      # The program of this machine's kind, taken out of its archive by the
+      # install script and run by scripts/smoke.sh in a temporary home: it
+      # must say the tag as its version, write what the plan says and remove
+      # it again.
+      - name: Install from the folder and smoke-run the program
+        run: |
+          home=$(mktemp -d)
+          env -i PATH="$PATH" HOME="$home" SERENO_INSTALL_FROM="$PWD/dist" sh dist/install.sh
+          sh scripts/smoke.sh "$home/.local/share/sereno/bin/sereno" --version "$GITHUB_REF_NAME"
+
+      - name: Hand the folder to the publish job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release
+          path: dist
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Attest and create the draft release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # create the draft release and upload its files
+      id-token: write # the short-lived identity the attestation is signed with
+      attestations: write # store the attestation with the repository
+    steps:
+      - name: Fetch the folder
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release
+          path: dist
+
+      - name: Check the folder once more
+        working-directory: dist
+        run: |
+          test "$(ls | wc -l)" -eq 9
+          sha256sum --check checksums.txt
+
+      # One attestation for all nine files: `gh attestation verify FILE
+      # --repo OWNER/NAME` then tells a download of any of them from a copy.
+      - name: Attest the build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+
+      # A draft: the owner reads it and publishes it. A tag with a
+      # pre-release part (v0.1.0-rc.1) is marked as a pre-release.
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          kind=
+          case $GITHUB_REF_NAME in *-*) kind=--prerelease ;; esac
+          notes="Draft made by the release workflow from the tag $GITHUB_REF_NAME. What changed is in CHANGELOG.md.
+
+          Each archive holds the program, LICENSE and README.md. checksums.txt has the SHA-256 of the six archives, and install.ps1 and install.sh carry the same values.
+
+          To check a download against the build that made it:
+
+              gh attestation verify FILE --repo $GH_REPO"
+          # shellcheck disable=SC2086
+          gh release create "$GITHUB_REF_NAME" dist/* --draft --verify-tag $kind --title "Serena Terminal $GITHUB_REF_NAME" --notes "$notes"

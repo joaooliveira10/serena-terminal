@@ -1,0 +1,364 @@
+# Continuous integration of Serena Terminal (test plan T10 of docs/spec-0.1.md).
+#
+# Six jobs:
+#   test      windows-latest, macos-latest, ubuntu-latest: go vet, go test, then
+#             the wrapper of the system (scripts/test.ps1 or scripts/test.sh),
+#             which runs the smoke run of the built program, the behaviour
+#             tests of the init files under every shell that is installed, the
+#             tests of the install scripts and the budgets with the CI gates
+#   checks    gofmt, go vet for the three systems, the dependency rule of R1,
+#             the six builds without cgo, the race detector
+#   floor     build and tests with Go 1.24, the version go.mod declares
+#   palette   the palette file, imported again from Serena Theme and compared
+#   release   the release build as a dry run: six archives, checksums and both
+#             install scripts; then install.sh and the program on Linux
+#   install   the install scripts of that dry run on Windows and macOS
+#
+# Nothing here publishes anything and no secret is used. Every action is
+# pinned to a commit; .github/dependabot.yml proposes the updates.
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - build-0.1
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # The toolchain is the one setup-go installed, never one fetched on the way.
+  GOTOOLCHAIN: local
+  # The version of the dry run of the release build.
+  VERSION: v0.0.0-ci.${{ github.run_number }}
+
+jobs:
+  test:
+    name: Tests on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - macos-latest
+          - ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.x'
+          cache: false
+
+      # ubuntu-latest has no zsh; it comes from the packages of the distribution.
+      - name: Install zsh on Ubuntu
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends zsh
+
+      # The labels move (ubuntu-latest to 26.04 in November 2026): the log
+      # says which image and which shells this run had.
+      - name: Show the image and the shells
+        run: |
+          echo "image: ${ImageOS:-unknown} ${ImageVersion:-unknown}"
+          uname -a
+          go version
+          bash --version | head -n 1
+          if command -v zsh > /dev/null 2>&1; then zsh --version; else echo "zsh: not installed"; fi
+          if command -v pwsh > /dev/null 2>&1; then pwsh -NoLogo -NoProfile -Command '"PowerShell " + $PSVersionTable.PSVersion'; else echo "pwsh: not installed"; fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test ./... -count=1
+
+      # Hosted by Windows PowerShell 5.1: the smoke run of the built program,
+      # test\shell\run.ps1 under 5.1 and under PowerShell 7, run.bash under
+      # Git Bash, the install scripts, and the budgets of 5.1 and of bash.
+      - name: Smoke run, shell tests, install scripts and budgets on Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts\test.ps1 -SkipGo -Bench
+
+      - name: Budgets under PowerShell 7 on Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts\bench.ps1 -SkipBash
+
+      # The smoke run of the built program, run.bash, run.zsh, run.ps1 under
+      # PowerShell 7, the install scripts, and the budgets of all three.
+      - name: Smoke run, shell tests, install scripts and budgets on macOS and Linux
+        if: runner.os != 'Windows'
+        run: sh scripts/test.sh --skip-go --bench
+
+  checks:
+    name: Format, dependencies, six builds, race detector
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.x'
+          cache: false
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt would change these files"
+            printf '%s\n' "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet for Linux, macOS and Windows
+        run: |
+          for os in linux darwin windows; do
+            echo "go vet for $os"
+            GOOS=$os GOARCH=amd64 go vet ./...
+          done
+
+      # R1: `go list -deps ./cmd/sereno` lists neither net nor net/http.
+      # net/url and net/netip come with text/template, open nothing and are
+      # other lines.
+      - name: The program links no network package
+        run: |
+          for target in windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do
+            deps=$(CGO_ENABLED=0 GOOS=${target%/*} GOARCH=${target#*/} go list -deps ./cmd/sereno)
+            if printf '%s\n' "$deps" | grep -x -e net -e net/http; then
+              echo "::error::for $target the program links a network package"
+              exit 1
+            fi
+            echo "$target: $(printf '%s\n' "$deps" | wc -l) packages, neither net nor net/http"
+          done
+
+      - name: Six builds without cgo
+        run: |
+          for target in windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do
+            echo "go build for $target"
+            CGO_ENABLED=0 GOOS=${target%/*} GOARCH=${target#*/} go build ./...
+          done
+
+      # One sereno at a time writes a folder (R13): the tests that start
+      # commands at the same instant, under the race detector.
+      - name: Race detector on the engine and the tree tests
+        run: go test -race -count=1 ./internal/engine ./test/e2e
+
+  floor:
+    name: Go 1.24, the floor of go.mod
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go 1.24
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.24.x'
+          cache: false
+
+      # encoding/json and text/template differ between 1.24 and 1.27; the
+      # byte-exact tests of the manifest, the palette file, the fragment and
+      # the reports must pass on both.
+      - name: Build and test with the oldest Go that go.mod allows
+        run: |
+          go version
+          go build ./...
+          go test ./... -count=1
+
+  palette:
+    name: The palette is the one of Serena Theme
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.x'
+          cache: false
+
+      # R6: internal/palette/serena.json names the repository, the tag and
+      # the commit it was imported from. The tag must still name that commit;
+      # the archive of that commit is fetched, and importing it again must
+      # give the committed file byte for byte.
+      - name: Import the palette again and compare
+        run: |
+          file=internal/palette/serena.json
+          repo=$(jq -r .source.repo "$file")
+          tag=$(jq -r .source.tag "$file")
+          commit=$(jq -r .source.commit "$file")
+          echo "source: $repo at $tag, commit $commit"
+          case $commit in
+            *[!0-9a-f]* | "") echo "::error::$file names no commit"; exit 1 ;;
+          esac
+
+          remote=$(git ls-remote "https://$repo" "refs/tags/$tag^{}" | cut -f 1)
+          if [ -z "$remote" ]; then remote=$(git ls-remote "https://$repo" "refs/tags/$tag" | cut -f 1); fi
+          if [ "$remote" != "$commit" ]; then
+            echo "::error::the tag $tag of $repo names the commit $remote, the palette file says $commit"
+            exit 1
+          fi
+
+          work=$(mktemp -d)
+          curl --fail --silent --show-error --location --proto '=https' --output "$work/theme.tar.gz" "https://$repo/archive/$commit.tar.gz"
+          mkdir "$work/theme"
+          tar -xzf "$work/theme.tar.gz" -C "$work/theme" --strip-components=1 --wildcards '*/themes/serena-*-color-theme.json'
+          ls "$work/theme/themes"
+          go run ./internal/tools/importpalette --themes "$work/theme/themes" --tag "$tag" --commit "$commit" --repo "$repo" --out "$work/serena.json"
+          if ! cmp "$work/serena.json" "$file"; then
+            echo "::error::$file is not what importing $tag gives"
+            diff "$work/serena.json" "$file" || true
+            exit 1
+          fi
+          echo "$file is what importing $tag gives"
+
+  release:
+    name: Release build, dry run
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.x'
+          cache: false
+
+      # The script .github/workflows/release.yml runs for a tag.
+      - name: Build the release folder
+        run: sh scripts/release.sh "$VERSION" dist
+
+      - name: Six archives, their checksums and two install scripts
+        working-directory: dist
+        run: |
+          ls -l
+          test "$(ls | wc -l)" -eq 9
+          test "$(wc -l < checksums.txt)" -eq 6
+          sha256sum --check checksums.txt
+          for target in darwin_amd64 darwin_arm64 linux_amd64 linux_arm64; do
+            test "$(tar -tzf "sereno_${VERSION}_$target.tar.gz" | sort | tr '\n' ' ')" = 'LICENSE README.md sereno '
+          done
+          for target in windows_amd64 windows_arm64; do
+            test "$(unzip -Z1 "sereno_${VERSION}_$target.zip" | sort | tr '\n' ' ')" = 'LICENSE README.md sereno.exe '
+          done
+          grep --quiet --fixed-strings --line-regexp "version='$VERSION'" install.sh
+          grep --quiet --fixed-strings --line-regexp "\$version = '$VERSION'" install.ps1
+
+      - name: The tests of install.sh on the real archives
+        run: sh test/install/run.sh --release dist
+
+      # What a user does, in a temporary home: install, run the program
+      # (scripts/smoke.sh keeps it in a sandbox of its own), remove it.
+      - name: Install from the folder, smoke-run the program, remove it
+        run: |
+          home=$(mktemp -d)
+          env -i PATH="$PATH" HOME="$home" SERENO_INSTALL_FROM="$PWD/dist" sh dist/install.sh
+          sh scripts/smoke.sh "$home/.local/share/sereno/bin/sereno" --version "$VERSION"
+          env -i PATH="$PATH" HOME="$home" sh dist/install.sh --uninstall
+          test -z "$(find "$home" -type f)"
+
+      - name: Keep the folder for the install job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-dry-run
+          path: dist
+          if-no-files-found: error
+          retention-days: 3
+
+  install:
+    name: Install scripts on ${{ matrix.os }}
+    needs: release
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - macos-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch the folder of the dry run
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-dry-run
+          path: dist
+
+      - name: install.sh on macOS, then the program, then the removal
+        if: runner.os == 'macOS'
+        run: |
+          sh test/install/run.sh --release dist
+          home=$(mktemp -d)
+          env -i PATH="$PATH" HOME="$home" SERENO_INSTALL_FROM="$PWD/dist" sh dist/install.sh
+          sh scripts/smoke.sh "$home/.local/share/sereno/bin/sereno" --version "$VERSION"
+          env -i PATH="$PATH" HOME="$home" sh dist/install.sh --uninstall
+          test -z "$(find "$home" -type f)"
+
+      - name: install.ps1 under Windows PowerShell 5.1, then the program, then the removal
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $dist = Join-Path $env:GITHUB_WORKSPACE 'dist'
+          $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $windowsPowerShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File test\install\run.ps1 -Release $dist
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+          $local = Join-Path $env:RUNNER_TEMP 'install-home\AppData\Local'
+          $null = New-Item -ItemType Directory -Path $local -Force
+          $env:LOCALAPPDATA = $local
+          $env:SERENO_HOME = $null
+          $env:SERENO_INSTALL_FROM = $dist
+          & $windowsPowerShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $dist 'install.ps1')
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $program = Join-Path $local 'sereno\bin\sereno.exe'
+          & $windowsPowerShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts\smoke.ps1 -Sereno $program -Version $env:VERSION
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & $windowsPowerShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $dist 'install.ps1') -Uninstall
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          if (Test-Path -LiteralPath (Join-Path $local 'sereno')) { Write-Host '::error::install.ps1 -Uninstall left the folder of sereno'; exit 1 }
+
+      - name: install.ps1 under PowerShell 7
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          pwsh -NoLogo -NoProfile -NonInteractive -File test/install/run.ps1 -Release (Join-Path $env:GITHUB_WORKSPACE 'dist')
+          if ($LASTEXITCODE -ne 0) { exit 1 }

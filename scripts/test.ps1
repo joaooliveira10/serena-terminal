@@ -22,9 +22,15 @@
 #      is not installed is reported as skipped, not as passed. They run on
 #      the rendered files, which step 4 has compared byte for byte with the
 #      ones `sereno apply` installs;
-#   6. with -Bench, the budgets of scripts\bench.ps1, which goes on to
+#   6. the install scripts of a release (scripts\install.ps1.tmpl and
+#      scripts\install.sh.tmpl): a folder of six stand-in programs is packed
+#      the way a release is, and test\install\run.ps1 and test\install\run.sh
+#      run the rendered scripts against it, in a home of their own and without
+#      the network (a good archive, a corrupted one, a missing checksum line,
+#      a second run, the removal);
+#   7. with -Bench, the budgets of scripts\bench.ps1, which goes on to
 #      scripts\bench.sh for bash;
-#   7. the listings of step 1 again: any difference fails the run.
+#   8. the listings of step 1 again: any difference fails the run.
 #
 # The program and the shells never see the real home: they are started with
 # a temporary folder as HOME, USERPROFILE, LOCALAPPDATA and APPDATA (the
@@ -138,6 +144,22 @@ try {
     Invoke-Go 'everything sereno generates was rendered' @('run', './internal/tools/golden', '--out', $rendered) @{ SERENO_SANDBOX = $tmp }
     $initDir = Join-Path $rendered 'init'
 
+    # A folder that stands in for a release, for step 6: six stand-in
+    # programs, packed with LICENSE and README.md, with checksums.txt and the
+    # two install scripts rendered for the version v0.0.0-test. The install
+    # scripts never start the program, so a line of text will do in its place.
+    Step 'a release folder of stand-in programs'
+    $standIns = Join-Path $tmp 'stand-ins'
+    foreach ($target in 'darwin_amd64', 'darwin_arm64', 'linux_amd64', 'linux_arm64', 'windows_amd64', 'windows_arm64') {
+        $folder = Join-Path $standIns $target
+        $null = New-Item -ItemType Directory -Path $folder -Force
+        $name = 'sereno'
+        if ($target -like 'windows_*') { $name = 'sereno.exe' }
+        [IO.File]::WriteAllText((Join-Path $folder $name), "stand-in for the program on $target`n")
+    }
+    $release = Join-Path $tmp 'release'
+    Invoke-Go 'the release folder was packed' @('run', './internal/tools/release', '--version', 'v0.0.0-test', '--binaries', $standIns, '--out', $release) @{ SERENO_SANDBOX = $tmp }
+
     $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 
     # -----------------------------------------------------------------------
@@ -210,7 +232,26 @@ try {
     Write-Host 'skip - zsh does not run on Windows without MSYS2: test\shell\run.zsh runs in CI on macOS and Linux'
 
     # -----------------------------------------------------------------------
-    # 6. Budgets.
+    # 6. The install scripts, against the release folder of stand-ins. The
+    #    environment is still the one of step 5: a temporary folder is the
+    #    home of everything that is started here.
+    foreach ($shell in $shells) {
+        Step "install.ps1 under $($shell[0])"
+        & $shell[1] -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $repo 'test\install\run.ps1') -Release $release
+        if ($LASTEXITCODE -ne 0) { Fail "test\install\run.ps1 under $($shell[0])" }
+    }
+    Step 'install.sh under the sh of Git Bash'
+    $sh = $null
+    if ($bash) { $sh = Join-Path (Split-Path -Parent $bash) 'sh.exe' }
+    if ($sh -and (Test-Path -LiteralPath $sh)) {
+        & $sh (& $posix (Join-Path $repo 'test\install\run.sh')) --release (& $posix $release)
+        if ($LASTEXITCODE -ne 0) { Fail 'test\install\run.sh under the sh of Git Bash' }
+    } else {
+        Write-Host 'skip - the sh of Git Bash was not found next to git.exe: test\install\run.sh did not run'
+    }
+
+    # -----------------------------------------------------------------------
+    # 7. Budgets.
     if ($Bench) {
         # bench.ps1 is started the way its header says and hands over to
         # scripts\bench.sh by itself: a hand-over that does not reach bash
@@ -227,7 +268,7 @@ try {
 }
 
 # ---------------------------------------------------------------------------
-# 7. The real places again.
+# 8. The real places again.
 
 Step 'guard: the real places after the run'
 $after = Get-Guard

@@ -18,8 +18,15 @@
 #      installed is reported as skipped, not as passed. They run on the
 #      rendered files, which step 4 has compared byte for byte with the ones
 #      `sereno apply` installs;
-#   6. with --bench, the budgets of scripts/bench.sh;
-#   7. the record of step 1 again: any difference fails the run.
+#   6. the install scripts of a release (scripts/install.sh.tmpl and
+#      scripts/install.ps1.tmpl): a folder of six stand-in programs is packed
+#      the way a release is, and test/install/run.sh runs the rendered
+#      install.sh against it, in a home of its own and without the network (a
+#      good archive, a corrupted one, a missing checksum line, a second run,
+#      the removal); with PowerShell 7 installed, test/install/run.ps1 checks
+#      that install.ps1 refuses to work outside Windows;
+#   7. with --bench, the budgets of scripts/bench.sh;
+#   8. the record of step 1 again: any difference fails the run.
 #
 # The program and the shells never see the real home: they are started with
 # an empty environment and a temporary folder as HOME (the shells without
@@ -122,9 +129,37 @@ else
     printf 'skip - pwsh is not installed: test/shell/run.ps1 did not run\n'
 fi
 
+# The install scripts, against a folder that stands in for a release: six
+# stand-in programs, packed with LICENSE and README.md, with checksums.txt and
+# the two install scripts rendered for the version v0.0.0-test. The install
+# scripts never start the program, so a line of text will do in its place.
+step 'a release folder of stand-in programs'
+for target in darwin_amd64 darwin_arm64 linux_amd64 linux_arm64 windows_amd64 windows_arm64; do
+    mkdir -p "$tmp/stand-ins/$target"
+    name=sereno
+    case $target in windows_*) name=sereno.exe ;; esac
+    printf 'stand-in for the program on %s\n' "$target" > "$tmp/stand-ins/$target/$name"
+done
+if SERENO_SANDBOX=$tmp go run ./internal/tools/release --version v0.0.0-test --binaries "$tmp/stand-ins" --out "$tmp/release"; then
+    printf 'ok - the release folder was packed\n'
+    step 'install.sh under sh'
+    clean sh test/install/run.sh --release "$tmp/release" || fail 'test/install/run.sh'
+    step 'install.ps1 under PowerShell 7'
+    if command -v pwsh > /dev/null 2>&1; then
+        clean pwsh -NoLogo -NoProfile -File test/install/run.ps1 -Release "$tmp/release" || fail 'test/install/run.ps1'
+    else
+        printf 'skip - pwsh is not installed: test/install/run.ps1 did not run\n'
+    fi
+else
+    fail 'go run ./internal/tools/release'
+fi
+
 if [ -n "$bench" ]; then
     step 'budgets'
-    clean bash --noprofile --norc scripts/bench.sh --init "$tmp/rendered/init" || fail 'scripts/bench.sh'
+    # `clean` hands no variable of this session on, so the looser gates that
+    # R42 gives PowerShell in CI are asked for by flag where CI is set.
+    # shellcheck disable=SC2086
+    clean bash --noprofile --norc scripts/bench.sh --init "$tmp/rendered/init" ${CI:+--ci} || fail 'scripts/bench.sh'
 fi
 
 step 'the real home'

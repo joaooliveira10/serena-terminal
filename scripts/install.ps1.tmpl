@@ -1,0 +1,190 @@
+# Serena Terminal __VERSION__: install script for Windows.
+#
+#   powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1
+#   powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Uninstall
+#
+# It runs under Windows PowerShell 5.1 and under PowerShell 7.
+#
+# All it does: it takes the archive of release __VERSION__ for this processor
+# from https://github.com/__REPOSITORY__/releases, compares the SHA-256 of the
+# archive with the value that was written into this file when the release was
+# built, stops when they differ, and puts the one file named sereno.exe from
+# the archive into the bin folder of sereno's own folder:
+#
+#   %SERENO_HOME%\bin\sereno.exe            when SERENO_HOME is set
+#   %LOCALAPPDATA%\sereno\bin\sereno.exe    otherwise
+#
+# It changes nothing else: not PATH, not a PowerShell profile, not the
+# registry, not the execution policy, not a setting of Windows Terminal. It
+# does not ask for more rights and does not start the program. LICENSE and
+# README.md of the archive are not unpacked.
+#
+# -ExecutionPolicy Bypass in the lines above holds for that one process: a
+# file that a browser downloaded is otherwise not run by Windows PowerShell.
+# Nothing is stored.
+#
+# $env:SERENO_INSTALL_FROM = 'DIR' takes the archive from the folder DIR
+# instead of downloading it: for a machine without a network, and for the
+# tests of this script. The checksum is compared all the same.
+#
+# This file is rendered from scripts/install.ps1.tmpl of the repository; the
+# three values below are filled in by the release build.
+[CmdletBinding()]
+param(
+    # Remove the program this script placed, and its folder when it is empty.
+    [switch]$Uninstall
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+
+$version = '__VERSION__'
+$repository = '__REPOSITORY__'
+# The lines of checksums.txt of this release: SHA-256, two spaces, file name.
+$checksums = @'
+__CHECKSUMS__
+'@
+
+# The path as PowerShell takes it on a command line.
+function Format-Quoted([string]$path) { "'" + $path.Replace("'", "''") + "'" }
+
+# An absolute path the way sereno itself judges it: a drive and a folder, or
+# a network share.
+function Test-Absolute([string]$path) { $path -match '^([A-Za-z]:[\\/]|\\\\)' }
+
+function Invoke-Install {
+    # A file that was not rendered by a release build installs nothing.
+    if ($version -notmatch '^v[0-9]') {
+        throw 'this is the template of the install script, not the script of a release; take install.ps1 from the release you want'
+    }
+    if ($env:OS -ne 'Windows_NT') { throw 'this is not Windows: use install.sh of the same release' }
+
+    # sereno's own folder, by the rule sereno itself goes by.
+    if ($env:SERENO_HOME) {
+        if (-not (Test-Absolute $env:SERENO_HOME)) { throw "SERENO_HOME must be an absolute path, got $($env:SERENO_HOME)" }
+        $root = $env:SERENO_HOME.TrimEnd('\', '/')
+    } else {
+        if ((-not $env:LOCALAPPDATA) -or (-not (Test-Absolute $env:LOCALAPPDATA))) { throw 'LOCALAPPDATA is not set to an absolute path' }
+        $root = Join-Path $env:LOCALAPPDATA.TrimEnd('\', '/') 'sereno'
+    }
+    $bin = Join-Path $root 'bin'
+    $target = Join-Path $bin 'sereno.exe'
+
+    if ($Uninstall) {
+        # While sereno's files are installed, the program is what removes them.
+        $manifest = Join-Path $root 'manifest.json'
+        if (Test-Path -LiteralPath $manifest) {
+            throw ("sereno is still applied here ($manifest exists), and the program is what takes its files and hook lines back. Run this first, then this script again:`n  & " + (Format-Quoted $target) + ' uninstall')
+        }
+        if (Test-Path -LiteralPath $target -PathType Leaf) {
+            Remove-Item -LiteralPath $target -Force
+            Write-Output "Removed $target"
+        } else {
+            Write-Output "Nothing to remove: $target does not exist."
+        }
+        foreach ($folder in $bin, $root) {
+            if (Test-Path -LiteralPath $folder -PathType Container) {
+                if (@(Get-ChildItem -LiteralPath $folder -Force).Count -eq 0) {
+                    Remove-Item -LiteralPath $folder -Force
+                    Write-Output "Removed $folder"
+                } else {
+                    Write-Output "$folder was left: it holds other files."
+                }
+            }
+        }
+        return
+    }
+
+    # A 32-bit PowerShell on a 64-bit Windows names the real processor in the
+    # second variable.
+    $processor = $env:PROCESSOR_ARCHITEW6432
+    if (-not $processor) { $processor = $env:PROCESSOR_ARCHITECTURE }
+    $arch = ''
+    if ($processor -eq 'AMD64') { $arch = 'amd64' }
+    elseif ($processor -eq 'ARM64') { $arch = 'arm64' }
+    else { throw "no sereno is built for the processor $processor" }
+    $asset = "sereno_${version}_windows_${arch}.zip"
+
+    $expected = ''
+    foreach ($line in ($checksums -split "`r?`n")) {
+        $parts = @($line.Trim() -split '\s+')
+        if (($parts.Count -eq 2) -and ($parts[1] -ceq $asset)) { $expected = $parts[0].ToLowerInvariant() }
+    }
+    if (-not $expected) { throw "this script carries no checksum for $asset, and it installs nothing it cannot check" }
+
+    $script:temporary = Join-Path ([IO.Path]::GetTempPath()) ('sereno-install-' + [guid]::NewGuid().ToString('N'))
+    $null = New-Item -ItemType Directory -Path $script:temporary
+    $archive = Join-Path $script:temporary $asset
+
+    if ($env:SERENO_INSTALL_FROM) {
+        $origin = Join-Path $env:SERENO_INSTALL_FROM $asset
+        if (-not (Test-Path -LiteralPath $origin -PathType Leaf)) { throw "$($env:SERENO_INSTALL_FROM) holds no $asset" }
+        Copy-Item -LiteralPath $origin -Destination $archive
+    } else {
+        $origin = "https://github.com/$repository/releases/download/$version/$asset"
+        # Windows PowerShell 5.1 may still start with older protocols only.
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri $origin -OutFile $archive
+        } catch {
+            throw "could not download ${origin}: $($_.Exception.Message); nothing was installed"
+        }
+    }
+
+    $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -cne $expected) {
+        throw "the SHA-256 of $origin is not the one of release $version; nothing was installed`n  expected $expected`n  found    $actual"
+    }
+
+    # Only sereno.exe leaves the archive, and only after the check.
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $unpacked = Join-Path $script:temporary 'sereno.exe'
+    $zip = [IO.Compression.ZipFile]::OpenRead($archive)
+    try {
+        $entry = $null
+        foreach ($candidate in $zip.Entries) { if ($candidate.FullName -ceq 'sereno.exe') { $entry = $candidate } }
+        if ($null -eq $entry) { throw "$asset holds no program named sereno.exe; nothing was installed" }
+        [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $unpacked, $true)
+    } finally {
+        $zip.Dispose()
+    }
+
+    $replaced = Test-Path -LiteralPath $target
+    if ($replaced -and -not (Test-Path -LiteralPath $target -PathType Leaf)) { throw "$target is in the way and is not a file; nothing was installed" }
+    $null = New-Item -ItemType Directory -Path $bin -Force
+    # Next to its place first, then over it, so that a copy that stops half
+    # way never leaves half a program under the name sereno.exe.
+    $script:staged = Join-Path $bin ('sereno-install-' + [guid]::NewGuid().ToString('N') + '.tmp')
+    Copy-Item -LiteralPath $unpacked -Destination $script:staged
+    Move-Item -LiteralPath $script:staged -Destination $target -Force
+    $script:staged = ''
+
+    if ($replaced) { Write-Output "sereno $version (windows/$arch) replaced the program that was at" }
+    else { Write-Output "sereno $version (windows/$arch) was placed at" }
+    Write-Output "  $target"
+    Write-Output "The SHA-256 of $asset is the one of the release: $expected"
+    Write-Output 'Nothing else was changed: not PATH, not a profile, not the registry, not a setting. The program was not started.'
+    Write-Output ''
+    Write-Output 'Next, see what sereno would write. This prints a plan and changes nothing:'
+    Write-Output ('  & ' + (Format-Quoted $target) + ' apply --dry-run')
+    Write-Output ''
+    Write-Output 'To remove the program again (after `sereno uninstall`, if you applied it):'
+    Write-Output '  powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Uninstall'
+    Write-Output "or delete $target yourself."
+}
+
+$script:temporary = ''
+$script:staged = ''
+$code = 0
+try {
+    Invoke-Install
+} catch {
+    [Console]::Error.WriteLine('install.ps1: ' + $_.Exception.Message)
+    $code = 1
+} finally {
+    if ($script:staged -and (Test-Path -LiteralPath $script:staged)) { Remove-Item -LiteralPath $script:staged -Force -ErrorAction SilentlyContinue }
+    if ($script:temporary -and (Test-Path -LiteralPath $script:temporary)) { Remove-Item -LiteralPath $script:temporary -Recurse -Force -ErrorAction SilentlyContinue }
+}
+exit $code

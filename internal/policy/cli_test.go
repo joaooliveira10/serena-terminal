@@ -518,8 +518,14 @@ func TestTheBuiltProgramOnlyRunsInASandbox(t *testing.T) {
 			t.Errorf("scripts/test.sh uses the built program other than to build it and to hand it to smoke.sh:\n  %s", strings.TrimSpace(line))
 		}
 	}
-	// No other script of the repository knows the program at all.
-	for _, name := range []string{"scripts/bench.ps1", "scripts/bench.sh", "test/shell/run.ps1", "test/shell/run.bash", "test/shell/run.zsh"} {
+	// No other script of the repository knows the program at all. The tests
+	// of the install scripts work on stand-ins, and the install scripts
+	// themselves place a program without starting it (see install_test.go,
+	// which also keeps scripts/release.sh to building).
+	for _, name := range []string{
+		"scripts/bench.ps1", "scripts/bench.sh", "test/shell/run.ps1", "test/shell/run.bash", "test/shell/run.zsh",
+		"test/install/run.ps1", "test/install/run.sh", "scripts/install.ps1.tmpl", "scripts/install.sh.tmpl",
+	} {
 		if regexp.MustCompile(`go build[^\n]*cmd/sereno|cmd[/\\]sereno`).MatchString(read(name)) {
 			t.Errorf("%s builds or runs the program; only the smoke scripts may", name)
 		}

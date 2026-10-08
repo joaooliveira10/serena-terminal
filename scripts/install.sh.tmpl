@@ -1,0 +1,223 @@
+#!/bin/sh
+# Serena Terminal __VERSION__: install script for macOS and Linux.
+#
+#   sh install.sh               place the sereno program
+#   sh install.sh --uninstall   remove the program this script placed
+#   sh install.sh --help        say what it would do, and do nothing
+#
+# All it does: it takes the archive of release __VERSION__ for this system and
+# processor from https://github.com/__REPOSITORY__/releases, compares the
+# SHA-256 of the archive with the value that was written into this file when
+# the release was built, stops when they differ, and puts the one file named
+# sereno from the archive into the bin folder of sereno's own folder:
+#
+#   $SERENO_HOME/bin/sereno                 when SERENO_HOME is set
+#   $XDG_DATA_HOME/sereno/bin/sereno        when XDG_DATA_HOME is set
+#   $HOME/.local/share/sereno/bin/sereno    otherwise
+#
+# It changes nothing else: not PATH, not a start-up file of a shell, not a
+# setting. It does not ask for more rights (no sudo) and does not start the
+# program. LICENSE and README.md of the archive are not unpacked.
+#
+# SERENO_INSTALL_FROM=DIR takes the archive from the folder DIR instead of
+# downloading it: for a machine without a network, and for the tests of this
+# script. The checksum is compared all the same.
+#
+# This file is rendered from scripts/install.sh.tmpl of the repository; the
+# three values below are filled in by the release build.
+
+set -eu
+
+version='__VERSION__'
+repository='__REPOSITORY__'
+# The lines of checksums.txt of this release: SHA-256, two spaces, file name.
+checksums='
+__CHECKSUMS__
+'
+
+say() { printf '%s\n' "$*"; }
+fail() {
+    printf 'install.sh: %s\n' "$*" >&2
+    exit 1
+}
+usage() {
+    say 'Usage: sh install.sh [--uninstall]'
+    say "  without an argument: place sereno $version in the bin folder of sereno's own folder"
+    say '  --uninstall: remove the program again, and the folder when it is empty'
+    say 'Nothing else is changed: not PATH, not a start-up file, not a setting.'
+}
+# quoted PATH: the path as a shell takes it, in single quotes when it needs them.
+quoted() {
+    case $1 in
+        *[!A-Za-z0-9/._-]*) printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")" ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
+action=install
+for argument in "$@"; do
+    case $argument in
+        --uninstall) action=uninstall ;;
+        -h | --help) action=help ;;
+        *)
+            printf 'install.sh: unknown argument %s\n' "$argument" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+if [ "$action" = help ]; then
+    usage
+    exit 0
+fi
+
+# A file that was not rendered by a release build installs nothing.
+case $version in
+    v[0-9]*) ;;
+    *) fail 'this is the template of the install script, not the script of a release; take install.sh from the release you want' ;;
+esac
+
+# sereno's own folder, by the rule sereno itself goes by.
+if [ -n "${SERENO_HOME-}" ]; then
+    case $SERENO_HOME in
+        /*) root=$SERENO_HOME ;;
+        *) fail "SERENO_HOME must be an absolute path, got $SERENO_HOME" ;;
+    esac
+else
+    data=${XDG_DATA_HOME-}
+    case $data in
+        /*) ;;
+        *)
+            case ${HOME-} in
+                /*) data=${HOME%/}/.local/share ;;
+                *) fail 'the home directory is unknown: HOME is not set to an absolute path' ;;
+            esac
+            ;;
+    esac
+    root=${data%/}/sereno
+fi
+root=${root%/}
+bin=$root/bin
+target=$bin/sereno
+
+if [ "$action" = uninstall ]; then
+    # While sereno's files are installed, the program is what removes them.
+    if [ -e "$root/manifest.json" ]; then
+        fail "sereno is still applied here ($root/manifest.json exists), and the program is what takes its files and hook lines back. Run this first, then this script again:
+  $(quoted "$target") uninstall"
+    fi
+    if [ -f "$target" ] || [ -L "$target" ]; then
+        rm -f "$target"
+        say "Removed $target"
+    else
+        say "Nothing to remove: $target does not exist."
+    fi
+    if [ -d "$bin" ]; then
+        if rmdir "$bin" 2> /dev/null; then say "Removed $bin"; else say "$bin was left: it holds other files."; fi
+    fi
+    if [ -d "$root" ]; then
+        if rmdir "$root" 2> /dev/null; then say "Removed $root"; else say "$root was left: it holds other files."; fi
+    fi
+    exit 0
+fi
+
+system=$(uname -s)
+case $system in
+    Linux) os=linux ;;
+    Darwin) os=darwin ;;
+    MINGW* | MSYS* | CYGWIN*) fail 'this is Windows: use install.ps1 of the same release' ;;
+    *) fail "no sereno is built for $system" ;;
+esac
+machine=$(uname -m)
+case $machine in
+    x86_64 | amd64) arch=amd64 ;;
+    arm64 | aarch64) arch=arm64 ;;
+    *) fail "no sereno is built for the processor $machine" ;;
+esac
+asset=sereno_${version}_${os}_${arch}.tar.gz
+if [ -d "$target" ]; then
+    fail "$target is in the way and is not a file; nothing was installed"
+fi
+
+expected=
+while read -r sum name; do
+    if [ "$name" = "$asset" ]; then expected=$sum; fi
+done << EOF
+$checksums
+EOF
+if [ -z "$expected" ]; then
+    fail "this script carries no checksum for $asset, and it installs nothing it cannot check"
+fi
+
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/sereno-install-XXXXXX") || fail 'cannot create a temporary folder'
+staged=
+cleanup() {
+    rm -rf "$tmp"
+    if [ -n "$staged" ]; then rm -f "$staged"; fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
+
+if [ -n "${SERENO_INSTALL_FROM-}" ]; then
+    origin=$SERENO_INSTALL_FROM/$asset
+    if [ ! -f "$origin" ]; then fail "$SERENO_INSTALL_FROM holds no $asset"; fi
+    cp "$origin" "$tmp/$asset"
+else
+    origin=https://github.com/$repository/releases/download/$version/$asset
+    if command -v curl > /dev/null 2>&1; then
+        curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --output "$tmp/$asset" "$origin" ||
+            fail "could not download $origin; nothing was installed"
+    elif command -v wget > /dev/null 2>&1; then
+        wget -q -O "$tmp/$asset" "$origin" || fail "could not download $origin; nothing was installed"
+    else
+        fail 'neither curl nor wget is installed; download the archive yourself and name its folder in SERENO_INSTALL_FROM'
+    fi
+fi
+
+if command -v sha256sum > /dev/null 2>&1; then
+    actual=$(sha256sum < "$tmp/$asset")
+elif command -v shasum > /dev/null 2>&1; then
+    actual=$(shasum -a 256 < "$tmp/$asset")
+elif command -v openssl > /dev/null 2>&1; then
+    actual=$(openssl dgst -sha256 -r < "$tmp/$asset")
+else
+    fail 'none of sha256sum, shasum and openssl is installed, so the archive cannot be checked; nothing was installed'
+fi
+actual=${actual%% *}
+if [ "$actual" != "$expected" ]; then
+    fail "the SHA-256 of $origin is not the one of release $version; nothing was installed
+  expected $expected
+  found    $actual"
+fi
+
+mkdir "$tmp/unpacked"
+tar -xzf "$tmp/$asset" -C "$tmp/unpacked" sereno || fail "$asset could not be unpacked; nothing was installed"
+if [ ! -f "$tmp/unpacked/sereno" ] || [ -L "$tmp/unpacked/sereno" ]; then
+    fail "$asset holds no program named sereno; nothing was installed"
+fi
+
+replaced=
+if [ -e "$target" ]; then replaced=1; fi
+mkdir -p "$bin"
+staged=$bin/.sereno-install-$$
+cp "$tmp/unpacked/sereno" "$staged"
+chmod 755 "$staged"
+mv -f "$staged" "$target"
+staged=
+
+if [ -n "$replaced" ]; then
+    say "sereno $version ($os/$arch) replaced the program that was at"
+else
+    say "sereno $version ($os/$arch) was placed at"
+fi
+say "  $target"
+say "The SHA-256 of $asset is the one of the release: $expected"
+say 'Nothing else was changed: not PATH, not a start-up file, not a setting. The program was not started.'
+say ''
+say 'Next, see what sereno would write. This prints a plan and changes nothing:'
+say "  $(quoted "$target") apply --dry-run"
+say ''
+say 'To remove the program again (after `sereno uninstall`, if you applied it):'
+say '  sh install.sh --uninstall'
+say "or delete $target yourself."
