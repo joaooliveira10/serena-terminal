@@ -24,7 +24,7 @@ Nothing has been released yet. This section describes version 0.1 as the code st
 ### Not verified yet
 
 - PowerShell 7, zsh and everything on macOS have run in CI only (GitHub-hosted runners, 2026-10-08), where the automated tests pass. None of it has run on a machine of the maintainer, and no person has seen it on a screen.
-- Nobody has looked at the result on screen in Windows Terminal, and the program has not been applied to a real user profile.
+- On a screen, one thing has been seen: on the maintainer's machine, `sereno theme --paint light` repainted an open Windows Terminal tab. The program has not been applied to a real user profile, and nothing else has been confirmed on a screen.
 - The exported theme files have not been loaded into their emulators.
 - The release workflow has not run, and the download step of the install scripts has not been used against a real release.
 

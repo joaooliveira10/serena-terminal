@@ -243,7 +243,7 @@ T14 Optional local Linux check: cross-compile with GOOS=linux and run T6 and T8 
 
 ## Biggest risks
 
-- The in-band route is verified in Windows Terminal's source (release-1.24: OSC 4/10/11/12/17 parsed, background change propagated to the control) but not yet on screen. Mitigation: spike T11 before any feature work; the fallback (inband off, scheme pair only) is already part of the design, so 0.1 ships either way.
+- The in-band route is verified in Windows Terminal's source (release-1.24: OSC 4/10/11/12/17 parsed, background change propagated to the control) but was not seen on screen when this was written (it was on 2026-10-08, for the light palette: see the last section). Mitigation: spike T11 before any feature work; the fallback (inband off, scheme pair only) is already part of the design, so 0.1 ships either way.
 - Windows Terminal writes on its own. The first time it loads the Serena profile it adds a stub to settings.json, records the GUID in state.json and re-serialises settings.json from its model (comments and formatting in that file are not expected to survive; inferred from the code, not tested). After uninstall the stub remains; if the user deletes it and reinstalls, the profile stays hidden. Mitigation: said before apply and after uninstall, `--no-profile` avoids it entirely, `status` detects the hidden case and prints the fix. Byte-identical uninstall is claimed for sereno's writes only.
 - First frame for light-mode users: with Windows Terminal's default theme (dark) a new Serena tab opens on Serena Dark and repaints at the first prompt, roughly 150-300 ms later; a settings reload in Windows Terminal resets an open tab to the profile's scheme until the mode changes or `sereno theme` is run. Mitigation: `status` and the README say that setting Windows Terminal's theme to 'Use Windows theme' removes both; the backed-up edit is offered in 0.3.
 - A bug in the hook editor could damage a profile, which would cost the project its credibility. Mitigation: hooks are opt-in; symlinks and unknown encodings are refused; a backup is taken before any edit; removal is by exact bytes; fixtures for CRLF, BOM and UTF-16; whole-tree hash tests on three systems; SERENO_SANDBOX in every test.
@@ -329,3 +329,11 @@ Made on 2026-10-08, after the first runs of the CI workflow, which were the firs
 - R26, not changed, and a limit that the first run on macOS showed: the home folder is shortened by its name. PowerShell named the folder a session was started in by its resolved path there (/private/var/... below a home given as /var/...), so below a home that is reached through a symbolic link the prompt of such a session shows the path in full. docs/support-matrix.md says so. What the prompt shows there after a change of folder by the other name was not tried.
 - T8: run.zsh compared two lists it believed sorted. Between double quotes zsh joins an array before the (o) flag can sort it; init.zsh created exactly the parameters and functions the test lists.
 - T10: the budgets of PowerShell 7 on Windows are a step of their own and are now printed also when a step before them failed. The check of the last sentence of T7 is two more steps on Windows, one for each PowerShell, after all the others.
+
+## What the owner saw on a screen
+
+Recorded on 2026-10-08, as he reported it. T11 was planned as a spike with a scratch script before any feature work; its first point was tried later, with the built program, which sends the same sequences.
+
+- T11, S1 in part: in an open tab of Windows Terminal 1.24.12741.0, `sereno theme --paint light` repainted the tab light. The fallback of S1 (0.1 with inband=off as its default) is therefore not taken.
+- Not reported, and so still open: S1 for hc and hc-light and for RESET, and S2, S3 and S4. The points of T12 look at the same things again, with a real profile.
+- T12 has not been run. It waits for the owner's go-ahead, as T12 says.

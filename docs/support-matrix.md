@@ -7,7 +7,7 @@ Two tiers:
 - **Tier 1**: the maintainer has it on his own machine, it is tested there, and he is to look at it on screen before a release. That is Windows 11 with Windows Terminal and PowerShell.
 - **Tier 2**: generated and tested by programs. Nobody has looked at the result on a screen.
 
-"Run" below means that the automated tests of this repository ran on that combination and passed. "In CI" means on a runner hosted by GitHub, in the runs of 2026-10-08: Windows Server 2025, macOS 26 on arm64 and Ubuntu 24.04. What is marked "in CI only" has never run on a machine of the maintainer. None of it means that a person has looked at the colours. That check, on screen in Windows Terminal, and a first apply to a real user profile are both still to come.
+"Run" below means that the automated tests of this repository ran on that combination and passed. "In CI" means on a runner hosted by GitHub, in the runs of 2026-10-08: Windows Server 2025, macOS 26 on arm64 and Ubuntu 24.04. What is marked "in CI only" has never run on a machine of the maintainer. None of it means that a person has looked at the colours. On a screen, one thing has been seen so far: on 2026-10-08 the maintainer ran `sereno theme --paint light` in an open tab of Windows Terminal 1.24.12741.0, and the tab turned light. The rest of that check, and a first apply to a real user profile, are still to come.
 
 ## Systems and shells
 

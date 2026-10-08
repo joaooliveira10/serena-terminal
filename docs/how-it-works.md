@@ -1,6 +1,6 @@
 # How it works
 
-This page explains what `sereno` does once it is applied: how the colours reach the screen, why the shell files contain no colour values, what the settings file holds, and what the check before each prompt costs. Version 0.1 is not released yet, and nothing described here has been looked at on a screen in Windows Terminal yet; where a sentence is about what Windows Terminal does rather than about what sereno does, it says so.
+This page explains what `sereno` does once it is applied: how the colours reach the screen, why the shell files contain no colour values, what the settings file holds, and what the check before each prompt costs. Version 0.1 is not released yet. Of what is described here, one thing has been seen on a screen in Windows Terminal: an open tab repainted when the palette was sent to it (`sereno theme --paint light`, on the maintainer's machine, 2026-10-08). Where a sentence is about what Windows Terminal does rather than about what sereno does, it says so.
 
 The measurements on this page were taken on 2026-10-08 on one machine: Windows 11, Windows PowerShell 5.1.26100 with PSReadLine 2.0.0, and the bash 5.3.15 of Git for Windows. PowerShell 7 and zsh are not installed on that machine: their figures come from the hosted runners of CI and are marked as such.
 

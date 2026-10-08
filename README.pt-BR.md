@@ -9,14 +9,15 @@ Read in English: [README.md](README.md).
 ## Situação
 
 <!-- sereno:status unreleased -->
-**A versão 0.1 ainda não foi lançada.** Não há release para baixar nem tag; os arquivos de release e os scripts de instalação descritos abaixo ainda não foram publicados. Hoje o programa só pode ser compilado a partir de uma cópia deste repositório.
+**A versão 0.1 ainda não foi lançada.** Não existe a tag `v0.1.0` nem release dela. As tags da forma `v0.1.0-rc.N` são candidatas a release: existem para ensaiar o próprio processo de release, e o que se compila a partir de uma delas não é a versão 0.1. Os arquivos de release e os scripts de instalação descritos abaixo só podem vir, por enquanto, de uma candidata, quando houver uma publicada na página de releases como pré-lançamento; fora isso, o programa é compilado a partir de uma cópia deste repositório.
 
 O que já foi conferido, e o que não foi:
 
 - **Rodou e passou** no Windows 11 com Windows PowerShell 5.1 e Git Bash: os testes em Go, os testes de comportamento dos arquivos de sessão do PowerShell e do bash, uma execução do programa compilado numa pasta pessoal temporária (apply, status, theme, check, export, linhas de hook, uninstall, com a pasta inteira comparada antes e depois) e os testes dos scripts de instalação.
 - **Rodou e passou** no Linux (Ubuntu no WSL): os testes em Go, os testes do bash e os testes do script de instalação no `dash`.
 - **Rodou e passou só no CI** (runners hospedados pelo GitHub, em 2026-10-08: Windows Server 2025, macOS 26 em arm64, Ubuntu 24.04): os mesmos testes e, com eles, tudo o que não existe na máquina do mantenedor: o PowerShell 7 (7.6.6 no Windows e no Linux, 7.6.5 no macOS, com PSReadLine 2.4.5), o zsh 5.9 no macOS e no Linux e o bash 3.2.57 no macOS. Ninguém viu nada disso numa tela.
-- **Ainda não foi feito:** ninguém olhou o resultado na tela do Windows Terminal, e o programa não foi aplicado a um perfil de usuário de verdade; as duas coisas estão previstas para antes do lançamento. Os quatro formatos de tema exportados não foram conferidos nos emuladores.
+- **Visto numa tela, uma coisa até agora:** em 2026-10-08 o mantenedor rodou `sereno theme --paint light` numa aba aberta do Windows Terminal 1.24, na máquina dele, e a aba ficou clara. Enviar a paleta a uma aba aberta é aquilo em que seguir o sistema se apoia.
+- **Ainda não foi feito:** o programa não foi aplicado a um perfil de usuário de verdade, então o perfil Serena, os seis esquemas de cores e uma sessão que segue o sistema sozinha ainda não foram vistos no Windows Terminal; esse teste de aceitação está previsto para antes do lançamento. Os quatro formatos de tema exportados não foram conferidos nos emuladores.
 
 As capturas de tela entram em `docs/images` depois desse teste de aceitação; por enquanto não há nenhuma.
 
@@ -352,7 +353,7 @@ Sem argumentos, mostra as configurações, o que o sistema informa e a variante 
 
 No Windows, o sereno lê três valores do registro do usuário atual, e só lê: se os aplicativos usam o tema claro, se um tema de contraste está ligado e a cor de janela desse tema de contraste (que distingue um tema de contraste claro de um escuro). Com `mode=auto`, eles escolhem uma das seis variantes. Uma sessão aberta pelo perfil Serena confere esses valores antes de cada prompt, dentro do próprio shell e sem iniciar nenhum programa, e, quando a variante não é a que ela pintou por último, envia ao Windows Terminal as dezesseis cores, a cor do texto, a do fundo, a do cursor e a da seleção. Assim, depois que você troca o Windows entre claro e escuro, a aba aberta muda no próximo prompt: aperte Enter. Não existe processo em segundo plano, e nada muda enquanto o shell está parado.
 
-Os limites, sem rodeios. O que o sereno faz vem do código e dos testes dele; o que o Windows Terminal faz com isso na tela ainda não foi conferido (veja Situação) e aparece como esperado onde isso importa:
+Os limites, sem rodeios. O que o sereno faz vem do código e dos testes dele. Do que o Windows Terminal faz com isso na tela, uma coisa foi vista: uma aba aberta repintada pelo `sereno theme --paint light` (veja Situação). O resto ainda não foi conferido e aparece como esperado onde isso importa:
 
 - **O primeiro quadro.** Uma aba Serena nova abre com o esquema de cores que o Windows Terminal escolhe e é repintada no primeiro prompt. A configuração de tema do próprio Windows Terminal é "dark" enquanto você não a muda, então, com o Windows em modo claro, o esperado é que uma aba nova comece escura por um instante. Na única máquina em que isso foi medido (Windows PowerShell 5.1), o sereno leva cerca de 70 ms para carregar e mais uns 60 ms no primeiro prompt, além do tempo de abertura do próprio PowerShell.
 - **A configuração de tema do próprio Windows Terminal.** O perfil Serena também indica um esquema escuro e um claro, como um par. O Windows Terminal só alterna esse par quando a configuração dele, em Aparência, é a que usa o tema do Windows; nesse caso, o esperado é que ele também escolha o esquema certo para o primeiro quadro. O sereno não muda essa configuração por você; o `sereno status` avisa quando ela não está assim (`wt.theme-not-system`).
@@ -371,7 +372,7 @@ Nível 1 quer dizer: o mantenedor tem isso na máquina dele, e é ali que é tes
 
 | | Situação hoje |
 | :--- | :--- |
-| Windows 11, Windows Terminal, Windows PowerShell 5.1 | Nível 1. Os testes automáticos passam na máquina do mantenedor; a conferência na tela ainda está por fazer. |
+| Windows 11, Windows Terminal, Windows PowerShell 5.1 | Nível 1. Os testes automáticos passam na máquina do mantenedor. Na tela, uma coisa foi vista ali (uma aba aberta repintada, veja Situação); o teste de aceitação com um perfil de verdade ainda está por fazer. |
 | Windows 11, PowerShell 7 | Nível 1 por projeto, com o mesmo arquivo de sessão. Os testes automáticos passam no CI com o PowerShell 7.6.6; ele não está instalado na máquina do mantenedor, então ali nada rodou nem foi visto. |
 | Git Bash no Windows | Nível 2. Testado. |
 | bash no Linux | Nível 2. Testado no Ubuntu, no WSL, e no CI. |

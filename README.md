@@ -9,14 +9,15 @@ Leia em português: [README.pt-BR.md](README.pt-BR.md).
 ## Status
 
 <!-- sereno:status unreleased -->
-**Version 0.1 is not released yet.** There is no release to download and no tag; the release archives and the install scripts described below have not been published yet. Today the program can only be built from a checkout of this repository.
+**Version 0.1 is not released yet.** There is no tag `v0.1.0` and no release of it. Tags of the form `v0.1.0-rc.N` are release candidates: they exist to try the release process itself, and what is built from one is not version 0.1. The release archives and the install scripts described below can so far come from a release candidate only, where one is published on the releases page as a pre-release; otherwise the program is built from a checkout of this repository.
 
 What has been checked so far, and what has not:
 
 - **Run and passing** on Windows 11 with Windows PowerShell 5.1 and Git Bash: the Go tests, the behaviour tests of the PowerShell and bash session files, a run of the built program in a temporary home folder (apply, status, theme, check, export, hook lines, uninstall, with the whole folder compared before and after), and the tests of the install scripts.
 - **Run and passing** on Linux (Ubuntu under WSL): the Go tests, the bash tests, and the tests of the install script under `dash`.
 - **Run and passing in CI only** (GitHub-hosted runners, 2026-10-08: Windows Server 2025, macOS 26 on arm64, Ubuntu 24.04): the same tests, and with them everything that is not on the maintainer's machine: PowerShell 7 (7.6.6 on Windows and Linux, 7.6.5 on macOS, with PSReadLine 2.4.5), zsh 5.9 on macOS and Linux, and bash 3.2.57 on macOS. No person has seen any of these on a screen.
-- **Not done yet:** nobody has looked at the result on screen in Windows Terminal, and the program has not been applied to a real user profile; both are planned before the release. The four exported theme formats were not checked in their emulators.
+- **Seen on a screen, one thing so far:** on 2026-10-08 the maintainer ran `sereno theme --paint light` in an open tab of Windows Terminal 1.24 on his machine, and the tab turned light. Sending the palette to an open tab is what following the system rests on.
+- **Not done yet:** the program has not been applied to a real user profile, so the Serena profile, the six colour schemes and a session that follows the system by itself have not been looked at in Windows Terminal; that acceptance test is planned before the release. The four exported theme formats were not checked in their emulators.
 
 Screenshots will be added to `docs/images` after that acceptance test; there are none yet.
 
@@ -352,7 +353,7 @@ Without arguments, shows the settings, what the system reports and the variant t
 
 On Windows, sereno reads three values of the current user's registry, and only reads them: whether applications use the light theme, whether a contrast theme is on, and the window colour of that contrast theme (which tells a light contrast theme from a dark one). With `mode=auto` they select one of the six variants. A session started from the Serena profile checks them before every prompt, inside the shell and without starting a program, and when the variant is not the one it painted last it sends the sixteen colours, the foreground, the background, the cursor and the selection colour to Windows Terminal. So after you switch Windows between light and dark, the open tab changes at its next prompt: press Enter. There is no background process, and nothing changes while the shell sits idle.
 
-The limits, stated plainly. What sereno does is taken from its code and its tests; what Windows Terminal does with it on screen has not been looked at yet (see Status), and is marked as expected where it matters:
+The limits, stated plainly. What sereno does is taken from its code and its tests. Of what Windows Terminal does with it on screen, one thing has been seen: an open tab repainted by `sereno theme --paint light` (see Status). The rest has not been looked at yet, and is marked as expected where it matters:
 
 - **The first frame.** A new Serena tab opens with the colour scheme Windows Terminal chooses and is repainted at its first prompt. Windows Terminal's own theme setting is "dark" unless you changed it, so with Windows in light mode a new tab is expected to start dark for a moment. On the one machine this was measured on (Windows PowerShell 5.1), sereno needs about 70 ms to load and about 60 ms more for its first prompt, on top of the start of PowerShell itself.
 - **Windows Terminal's own theme setting.** The Serena profile also names a dark and a light scheme as a pair. Windows Terminal switches that pair only when its own setting, under Appearance, is "Use Windows theme"; it is then expected to choose the right scheme for the first frame as well. sereno does not change that setting for you; `sereno status` tells you when it is not set (`wt.theme-not-system`).
@@ -371,7 +372,7 @@ Tier 1 means: the maintainer has it on his machine and it is tested there. Tier 
 
 | | State today |
 | :--- | :--- |
-| Windows 11, Windows Terminal, Windows PowerShell 5.1 | Tier 1. Automated tests pass on the maintainer's machine; the check on screen is still to come. |
+| Windows 11, Windows Terminal, Windows PowerShell 5.1 | Tier 1. Automated tests pass on the maintainer's machine. On screen, one thing has been seen there (an open tab repainted, see Status); the acceptance test with a real profile is still to come. |
 | Windows 11, PowerShell 7 | Tier 1 by design, the same session file. Automated tests pass in CI under PowerShell 7.6.6; it is not installed on the maintainer's machine, so nothing was run or seen there. |
 | Git Bash on Windows | Tier 2. Tested. |
 | bash on Linux | Tier 2. Tested on Ubuntu under WSL and in CI. |
