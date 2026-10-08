@@ -97,6 +97,18 @@ Check ($types.Count -gt 8 -and $foreign.Count -eq 0) 'init.ps1 uses no type that
 # The temporary world of the sessions.
 
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ('sereno-ps-' + [guid]::NewGuid().ToString('N'))
+$null = New-Item -ItemType Directory -Path $tmp -Force
+# The folder goes by the name a process started in it gives it. On macOS the
+# temporary folder is reached through a symbolic link (/var is /private/var):
+# a session started in ~/work is then in /private/var/..., while a HOME taken
+# from the name above says /var/... The prompt shortens the home folder by
+# its name, as bash and zsh do, so the two names of one folder would make
+# every expected prompt wrong. The system resolves the links when it is asked
+# for the working directory.
+if (-not $onWindows) {
+    $startedIn = [Environment]::CurrentDirectory
+    try { [Environment]::CurrentDirectory = $tmp; $tmp = [Environment]::CurrentDirectory } finally { [Environment]::CurrentDirectory = $startedIn }
+}
 $userHome = Join-Path $tmp 'home'
 # ROOT in its default place, so that the hook line of R21 finds it:
 # %LOCALAPPDATA%\sereno on Windows, ~/.local/share/sereno elsewhere.
@@ -159,17 +171,23 @@ $baseEnv = @{
 }
 if ($onWindows) { $baseEnv['HOMEDRIVE'] = $userHome.Substring(0, 2); $baseEnv['HOMEPATH'] = $userHome.Substring(2) }
 
-function Start-Child([string]$arguments, [hashtable]$extraEnv, [string]$directory) {
+function Start-Child([string]$arguments, [hashtable]$extraEnv, [string]$directory, [bool]$ownConsole = $false) {
     $info = New-Object System.Diagnostics.ProcessStartInfo
     $info.FileName = $exe
     $info.Arguments = $arguments
     $info.UseShellExecute = $false
     $info.CreateNoWindow = $true
-    $info.RedirectStandardInput = $true
-    $info.RedirectStandardOutput = $true
-    $info.RedirectStandardError = $true
+    # A child with a console of its own (Windows): no stream is redirected,
+    # so the child gets a console, one without a window, and its output is a
+    # console as in a terminal. What it has to say it writes to a file.
+    $info.RedirectStandardInput = -not $ownConsole
+    $info.RedirectStandardOutput = -not $ownConsole
+    $info.RedirectStandardError = -not $ownConsole
     $info.WorkingDirectory = $directory
     foreach ($pair in @($baseEnv.GetEnumerator()) + @($extraEnv.GetEnumerator())) { $info.EnvironmentVariables[$pair.Key] = [string]$pair.Value }
+    # The PATH this child is given, once more under a name PowerShell leaves
+    # alone (see the start of the library below).
+    $info.EnvironmentVariables['SERENO_T_PATH'] = $info.EnvironmentVariables['PATH']
     # Windows PowerShell hands a child the preamble of [Console]::InputEncoding
     # on its redirected input. In a console whose input code page is 65001
     # that is a byte order mark, which a session that reads its commands from
@@ -184,6 +202,12 @@ function Start-Child([string]$arguments, [hashtable]$extraEnv, [string]$director
     } catch { $inputEncoding = $null }
     try { $process = [Diagnostics.Process]::Start($info) }
     finally { if ($null -ne $inputEncoding) { [Console]::InputEncoding = $inputEncoding } }
+    if ($ownConsole) {
+        if (-not $process.WaitForExit(120000)) { $process.Kill(); $process.WaitForExit() }
+        $result = [pscustomobject]@{ Out = ''; Err = ''; Code = $process.ExitCode }
+        $process.Dispose()
+        return $result
+    }
     $process.StandardInput.Close()
     $errTask = $process.StandardError.ReadToEndAsync()
     $outTask = $process.StandardOutput.ReadToEndAsync()
@@ -197,6 +221,14 @@ function Start-Child([string]$arguments, [hashtable]$extraEnv, [string]$director
 $library = {
     Set-StrictMode -Version Latest
     $ErrorActionPreference = 'Stop'
+    # PowerShell 6 and later start by putting the folder they are installed
+    # in at the front of PATH, so that a session finds the same PowerShell
+    # again (seen in CI: "<folder of pwsh>;<the empty folder>" on Windows,
+    # and the same with a colon on macOS and Linux). Windows PowerShell 5.1
+    # does not. The session gets back the PATH the test gave it, on which
+    # nothing can be found, before init.ps1 runs: a program it tried to start
+    # would not be there, PowerShell itself included.
+    $env:PATH = $env:SERENO_T_PATH
     $E = [string][char]27
     $BEL = [string][char]7
     $LF = "`n"
@@ -258,19 +290,40 @@ $withReadLine = {
 
 # Runs one session: a child process that executes library + body and prints
 # check lines.
-function Invoke-Session([string]$name, [hashtable]$environment, [string]$mode, [scriptblock]$body, [bool]$readLine = $true) {
+#
+# With $ownConsole the child is not given the pipes of this script but a
+# console of its own, without a window: its output is then a console, as in a
+# terminal, which is what PSReadLine looks at before it offers predictions.
+# The check lines go to a file instead, and so does an error that ends the
+# session.
+$toFile = {
+    $report = New-Object System.IO.StreamWriter $env:SERENO_T_REPORT
+    $report.AutoFlush = $true
+    [Console]::SetOut($report)
+    trap { [Console]::Out.WriteLine('not ok - the session ended with an error: ' + ([string]$_).Replace("`n", ' ')); exit 1 }
+}
+function Invoke-Session([string]$name, [hashtable]$environment, [string]$mode, [scriptblock]$body, [bool]$readLine = $true, [bool]$ownConsole = $false) {
     if ($Only -and -not $name.Contains($Only)) { return }
     [Console]::Out.WriteLine("# session: $name")
     if ($mode -eq '<none>') { if (Test-Path -LiteralPath $modeFile) { Remove-Item -LiteralPath $modeFile -Force } }
     else { [IO.File]::WriteAllText($modeFile, $mode) }
-    $script = $library.ToString() + "`n"
+    $script = ''
+    if ($ownConsole) { $script = $toFile.ToString() + "`n" }
+    $script += $library.ToString() + "`n"
     if ($readLine) { $script += $withReadLine.ToString() + "`n" }
     $script += $body.ToString() + "`n"
     $file = Join-Path $sessionDir (($name -replace '[^A-Za-z0-9]+', '-') + '.ps1')
     [IO.File]::WriteAllText($file, $script)
     $arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $file + '"'
     if (-not $onWindows) { $arguments = '-NoLogo -NoProfile -NonInteractive -File "' + $file + '"' }
-    $child = Start-Child $arguments $environment (Join-Path $userHome 'work')
+    if ($ownConsole) {
+        $report = Join-Path $sessionDir 'report.txt'
+        if (Test-Path -LiteralPath $report) { Remove-Item -LiteralPath $report -Force }
+        $child = Start-Child $arguments ($environment + @{ SERENO_T_REPORT = $report }) (Join-Path $userHome 'work') $true
+        if (Test-Path -LiteralPath $report) { $child.Out = [IO.File]::ReadAllText($report) }
+    } else {
+        $child = Start-Child $arguments $environment (Join-Path $userHome 'work')
+    }
     $lines = 0
     foreach ($line in ($child.Out -split "`r?`n")) {
         if ($line -eq '') { continue }
@@ -353,11 +406,27 @@ try {
         Get-PSReadLineKeyHandler | Where-Object { $_.Key -in 'Tab', 'UpArrow', 'DownArrow' } | ForEach-Object { $handlers[[string]$_.Key] = [string]$_.Function }
         CheckEqual ("{0} {1} {2}" -f $handlers['Tab'], $handlers['UpArrow'], $handlers['DownArrow']) 'MenuComplete HistorySearchBackward HistorySearchForward' 'comfort set: Tab, UpArrow and DownArrow'
         if ($null -eq $predictionBefore) { Check (-not $options.PSObject.Properties['PredictionSource']) 'this PSReadLine has no PredictionSource, and init.ps1 did not try to set it' }
-        elseif ($predictionBefore -eq 'None') { CheckEqual ([string]$options.PredictionSource) 'History' 'comfort set: PredictionSource was None and is History' }
+        elseif ($predictionBefore -eq 'None') {
+            # On Windows PSReadLine has predictions only where it can draw
+            # them. Asked for them in a session like this one, whose output
+            # is not a console, it answers "The predictive suggestion feature
+            # cannot be enabled because the console output doesn't support
+            # virtual terminal processing or it's redirected" (seen in CI
+            # under PowerShell 7.6.6). So PSReadLine itself is asked, after
+            # init.ps1 has run: where it takes History, init.ps1 must have
+            # set it; where it refuses, the value is still None, and the
+            # check of $Error above has shown that init.ps1 did not ask.
+            $predictionAfter = [string]$options.PredictionSource
+            $taken = $true
+            try { Set-PSReadLineOption -PredictionSource History } catch { $taken = $false; $Error.RemoveAt(0) }
+            if ($taken) { CheckEqual $predictionAfter 'History' 'comfort set: PredictionSource was None and is History' }
+            else { CheckEqual $predictionAfter 'None' 'comfort set: PredictionSource was None and stays None, because PSReadLine refuses predictions where the output is not a console' }
+        }
         else { CheckEqual ([string]$options.PredictionSource) $predictionBefore 'comfort set: a PredictionSource that was not None is left alone' }
 
         # R26 and R30: the first prompt paints, and carries the marks.
         $here = (Get-Location).ProviderPath
+        CheckEqual $here (Join-Path $T.Home 'work') 'the session starts in ~/work, and names that folder as the test does'
         $shown = '~' + $T.Sep + 'work'
         $startMarks = $E + ']133;A' + $BEL + $E + ']9;9;"' + $here + '"' + $BEL
         $endMark = $E + ']133;B' + $BEL
@@ -629,6 +698,34 @@ try {
         CheckEqual $run.Text $stockText 'prompt=off: the stock prompt stays, and returns what it returned before'
         CheckEqual $run.Console (Palette 'dark') 'prompt=off: the stock prompt is wrapped, so the session still follows the system'
     }
+
+    # R27: History predictions are switched on where PSReadLine has them,
+    # they are off, and PSReadLine can show them. Current versions start with
+    # predictions on wherever they can draw them, so they are switched off
+    # here first. PSReadLine is the judge of what it takes: it is asked
+    # directly after init.ps1 has run. Outside Windows it always takes them.
+    # On Windows it does not in a session whose output is redirected, like
+    # the first of these two, and does in a console, like the second.
+    $predictions = {
+        [Console]::Out.WriteLine('# the output of this session is ' + $(if ([Console]::IsOutputRedirected) { 'redirected' } else { 'a console' }) + '; the host says virtual terminal sequences are ' + $(if ($Host.UI.SupportsVirtualTerminal) { 'supported' } else { 'not supported' }))
+        $has = (Get-Command Set-PSReadLineOption).Parameters.ContainsKey('PredictionSource')
+        if ($has) { Set-PSReadLineOption -PredictionSource None }
+        $run = Capture { . $T.Init }
+        Check ($run.Console -eq '' -and $run.Output.Count -eq 0 -and $Error.Count -eq 0) 'with predictions off, init.ps1 prints nothing and nothing in it fails' ($(if ($Error.Count) { [string]$Error[0] }))
+        if (-not $has) {
+            Check (-not (Get-PSReadLineOption).PSObject.Properties['PredictionSource']) "PSReadLine $((Get-Module PSReadLine).Version) has no predictions: there is nothing to switch on"
+        } else {
+            $after = [string](Get-PSReadLineOption).PredictionSource
+            $taken = $true
+            try { Set-PSReadLineOption -PredictionSource History } catch { $taken = $false }
+            if ($taken) { CheckEqual $after 'History' 'PSReadLine takes predictions here, and init.ps1 switched History on' }
+            else { CheckEqual $after 'None' 'PSReadLine refuses predictions here, and init.ps1 left them off without asking' }
+        }
+        CheckEqual ([string](Get-PSReadLineOption).BellStyle) 'None' 'the rest of the comfort set is there either way'
+        CheckEqual ([string](Get-PSReadLineOption).CommandColor) ($E + '[34m') 'and so are the colours of the line editor'
+    }
+    Invoke-Session 'predictions switched off before init.ps1' $profileSession $defaultMode $predictions
+    if ($onWindows) { Invoke-Session 'predictions switched off before init.ps1, in a console of its own' $profileSession $defaultMode $predictions $true $true }
 
     Invoke-Session 'a prompt of the user in Windows Terminal' $profileSession $defaultMode {
         function global:prompt { $status = $?; "[$status] mine> "; 'second object' }

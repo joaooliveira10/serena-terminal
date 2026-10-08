@@ -94,7 +94,9 @@ cp $init $root/shell/init.zsh
 hook_line='[ -r "$HOME/.local/share/sereno/shell/init.zsh" ] && . "$HOME/.local/share/sereno/shell/init.zsh" # sereno:hook'
 default_mode='mode=auto\nflavor=soft\ninband=profile\nkeys=profile\nprompt=on\n'
 
-tree() { mkdir -p ${1:h}; printf $2 > $1; }
+# The format is quoted: zsh drops a word that is an empty parameter without
+# quotes, and printf would be left without its format ("not enough arguments").
+tree() { mkdir -p ${1:h}; printf "$2" > $1; }
 tree $home/repo/.git/HEAD 'ref: refs/heads/feature/x\n'
 tree $home/repo/sub/deep/keep ''
 tree $home/detached/.git/HEAD '0123456789abcdef0123456789abcdef01234567\n'
@@ -109,9 +111,9 @@ odd=$tmp/registry
 reg() { # reg TREE FLAGS WINDOW LIGHT, each a printf format or - for no file
     local d=$odd/$1
     mkdir -p "$d/Control Panel/Accessibility/HighContrast" "$d/Control Panel/Colors" "$d/Software/Microsoft/Windows/CurrentVersion/Themes/Personalize"
-    [[ $2 = - ]] || printf $2 > "$d/Control Panel/Accessibility/HighContrast/Flags"
-    [[ $3 = - ]] || printf $3 > "$d/Control Panel/Colors/Window"
-    [[ $4 = - ]] || printf $4 > "$d/Software/Microsoft/Windows/CurrentVersion/Themes/Personalize/AppsUseLightTheme"
+    [[ $2 = - ]] || printf "$2" > "$d/Control Panel/Accessibility/HighContrast/Flags"
+    [[ $3 = - ]] || printf "$3" > "$d/Control Panel/Colors/Window"
+    [[ $4 = - ]] || printf "$4" > "$d/Software/Microsoft/Windows/CurrentVersion/Themes/Personalize/AppsUseLightTheme"
 }
 reg plain '1\n' '128 127 127\n' '\002\0\0\0'
 reg edge '127' '127 127 127' '\0\001\0\0'
@@ -195,10 +197,12 @@ PROMPT='before> '
 source_init
 slurp $T_TMP/out; check_eq "$REPLY" '' 'init.zsh writes nothing to standard output'
 slurp $T_TMP/err; check_eq "$REPLY" '' 'init.zsh writes nothing to standard error'
-new=(${(k)parameters}); new=(${new:|before}); new=(${new:#(before|functions_before|here|options_before|new|REPLY)})
-check_eq "${(o)new}" 'LSCOLORS LS_COLORS __sereno_branch __sereno_flavor __sereno_hc __sereno_hcl __sereno_inband __sereno_last __sereno_light __sereno_loaded __sereno_mode __sereno_profile __sereno_prompt_on __sereno_reg __sereno_reply __sereno_root __sereno_show __sereno_term __sereno_variant precmd_functions' 'init.zsh creates the parameters it needs and no other'
-new=(${(k)functions}); new=(${new:|functions_before})
-check_eq "${(o)new}" '__sereno_byte __sereno_find_branch __sereno_follow __sereno_paint __sereno_precmd __sereno_resolve __sereno_settings __sereno_signals' 'init.zsh defines its functions and no other'
+# The names are sorted before they are joined into one word: between double
+# quotes zsh joins an array first, and (o) then has a single word to sort.
+new=(${(k)parameters}); new=(${new:|before}); new=(${new:#(before|functions_before|here|options_before|new|REPLY)}); new=(${(o)new})
+check_eq "${new[*]}" 'LSCOLORS LS_COLORS __sereno_branch __sereno_flavor __sereno_hc __sereno_hcl __sereno_inband __sereno_last __sereno_light __sereno_loaded __sereno_mode __sereno_profile __sereno_prompt_on __sereno_reg __sereno_reply __sereno_root __sereno_show __sereno_term __sereno_variant precmd_functions' 'init.zsh creates the parameters it needs and no other'
+new=(${(k)functions}); new=(${new:|functions_before}); new=(${(o)new})
+check_eq "${new[*]}" '__sereno_byte __sereno_find_branch __sereno_follow __sereno_paint __sereno_precmd __sereno_resolve __sereno_settings __sereno_signals' 'init.zsh defines its functions and no other'
 check_eq "$(setopt; alias; bindkey 2> /dev/null)" "$options_before" 'init.zsh leaves options, aliases and key bindings alone'
 check_eq "$PWD" "$here" 'init.zsh leaves the directory alone'
 check_eq "$PROMPT" 'before> ' 'init.zsh does not set PROMPT itself: the hook does, before each prompt'

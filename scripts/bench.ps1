@@ -259,9 +259,13 @@ $c = [Globalization.CultureInfo]::InvariantCulture
     if ($mean -le $promptBudget) { $line += "  ok, budget $(Format-Ms $promptBudget)" } else { $line += "  OVER the budget of $(Format-Ms $promptBudget)"; $failed = $true }
     Write-Output $line
 
-    # 3. the same with PATH emptied
-    $extra = @{ WT_SESSION = 'bench'; SERENO_SESSION = 'wt-profile'; PATH = $emptyPath }
-    $child = Invoke-Child $promptScript $extra
+    # 3. the same with PATH emptied. PowerShell 6 and later put their own
+    # folder in front of PATH when they start; the child takes it off again
+    # before anything else, and says at its end what PATH was by then.
+    $extra = @{ WT_SESSION = 'bench'; SERENO_SESSION = 'wt-profile'; PATH = $emptyPath; SERENO_BENCH_PATH = $emptyPath }
+    $child = Invoke-Child ("`$env:PATH = `$env:SERENO_BENCH_PATH`n" + $promptScript + "`n'PATH=' + `$env:PATH`n") $extra
+    $seen = @($child.Out -split "`r?`n" | Where-Object { $_.StartsWith('PATH=') })
+    if (($seen.Count -ne 1) -or ($seen[0] -cne ('PATH=' + $emptyPath))) { throw "PATH was not the empty folder to the end: $($seen -join ' | ')" }
     Write-Output ("with PATH emptied: init and {0} prompts ran, mean {1} ms  ok" -f (2 * $Calls + 1), (Format-Ms (& $number $child.Out 'MEAN')))
 
     # bash, through scripts/bench.sh, while the rendered files still exist.

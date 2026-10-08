@@ -98,8 +98,9 @@ jobs:
         shell: cmd
         run: powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts\test.ps1 -SkipGo -Bench
 
+      # Also after a failed step before it: the figures are wanted either way.
       - name: Budgets under PowerShell 7 on Windows
-        if: runner.os == 'Windows'
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
         shell: cmd
         run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts\bench.ps1 -SkipBash
 
@@ -108,6 +109,17 @@ jobs:
       - name: Smoke run, shell tests, install scripts and budgets on macOS and Linux
         if: runner.os != 'Windows'
         run: sh scripts/test.sh --skip-go --bench
+
+      # TEMPORARY, removed before the branch is done: where the time of
+      # init.ps1 goes on this runner.
+      - name: TEMPORARY diagnostics of init.ps1 under PowerShell 7
+        if: ${{ !cancelled() }}
+        run: pwsh -NoLogo -NoProfile -File scripts/diag.ps1
+
+      - name: TEMPORARY diagnostics of init.ps1 under Windows PowerShell 5.1
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        shell: cmd
+        run: powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts\diag.ps1
 
   checks:
     name: Format, dependencies, six builds, race detector

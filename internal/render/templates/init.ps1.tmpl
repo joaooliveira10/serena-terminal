@@ -212,7 +212,20 @@ $global:__sereno = @{
                     if ($type.GetProperty('BellStyle')) { $arguments['BellStyle'] = 'None' }
                     if ($type.GetProperty('HistoryNoDuplicates')) { $arguments['HistoryNoDuplicates'] = $true }
                     if ($type.GetProperty('HistorySearchCursorMovesToEnd')) { $arguments['HistorySearchCursorMovesToEnd'] = $true }
-                    if ($type.GetProperty('PredictionSource')) { if ([string]$options.PredictionSource -ceq 'None') { $arguments['PredictionSource'] = 'History' } }
+                    if ($type.GetProperty('PredictionSource')) {
+                        if ([string]$options.PredictionSource -ceq 'None') {
+                            # On Windows PSReadLine refuses predictions where
+                            # it cannot draw them: with the output redirected,
+                            # or in a console without virtual terminal
+                            # sequences. It is asked only where it will agree.
+                            $predict = $true
+                            if ($env:OS -ceq 'Windows_NT') {
+                                $predict = $false
+                                try { if (-not [Console]::IsOutputRedirected) { $predict = [bool]$Host.UI.SupportsVirtualTerminal } } catch {}
+                            }
+                            if ($predict) { $arguments['PredictionSource'] = 'History' }
+                        }
+                    }
                 }
 
                 if ($arguments.Count) {
