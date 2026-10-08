@@ -1,6 +1,7 @@
 package testenv
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -48,18 +49,29 @@ func TestNewIsHermetic(t *testing.T) {
 func TestNewFromCopiesTheFixture(t *testing.T) {
 	home := NewFrom(t, "wt-present")
 	tree := Snapshot(t, home.Dir)
+	// The last three are stored under short alias names in the repository
+	// and must arrive under the real, long ones.
 	for _, want := range []string{
 		".bashrc",
 		"Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1",
 		"AppData/Local/Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json",
+		"AppData/Local/Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/state.json",
 		"AppData/Local/Microsoft/Windows Terminal/Fragments/Git/git-bash.json",
 	} {
 		if !strings.HasPrefix(tree[want], "file:") {
 			t.Errorf("%s was not copied (%q)", want, tree[want])
 		}
 	}
-	if tree["AppData/Local"] != "dir" {
+	if tree["AppData/Local"] != "dir" || tree["AppData/Local/Microsoft/Windows Terminal/Fragments/Git"] != "dir" {
 		t.Errorf("directories are not in the snapshot: %v", tree)
+	}
+	for key := range tree {
+		if strings.Contains(key, "@") {
+			t.Errorf("an alias name reached the home: %s", key)
+		}
+	}
+	if len(tree) != 16 {
+		t.Errorf("the home holds %d entries, want the 5 files and their 11 directories: %v", len(tree), tree)
 	}
 
 	// The copy is byte-exact: the CRLF profile keeps its line endings.
@@ -71,6 +83,55 @@ func TestNewFromCopiesTheFixture(t *testing.T) {
 	empty := NewFrom(t, "empty")
 	if left := Snapshot(t, empty.Dir); len(left) != 0 {
 		t.Errorf("the empty fixture copied something: %v", left)
+	}
+}
+
+func TestExpand(t *testing.T) {
+	tests := map[string]string{
+		"@wt-state":                    "AppData/Local/Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState",
+		"@wt-state/settings.json":      "AppData/Local/Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json",
+		"@wt-fragments/Git/git.json":   "AppData/Local/Microsoft/Windows Terminal/Fragments/Git/git.json",
+		"Documents/@wt-state/x":        "Documents/@wt-state/x", // only at the top level
+		"@unknown/x":                   "@unknown/x",
+		".bashrc":                      ".bashrc",
+		"AppData/Local/sereno/mode":    "AppData/Local/sereno/mode",
+		"@wt-state-and-more/file.json": "@wt-state-and-more/file.json",
+	}
+	for in, want := range tests {
+		if got := filepath.ToSlash(expand(filepath.FromSlash(in))); got != want {
+			t.Errorf("expand(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestJunction checks the helper the sandbox tests rely on: what it makes
+// must really lead to the target, or those tests would prove nothing.
+func TestJunction(t *testing.T) {
+	home := New(t)
+	target := TempDir(t)
+	if err := os.WriteFile(filepath.Join(target, "inside.txt"), []byte("reached"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(home.Dir, "junction")
+	Junction(t, target, link)
+
+	data, err := os.ReadFile(filepath.Join(link, "inside.txt"))
+	if err != nil || string(data) != "reached" {
+		t.Fatalf("reading through the junction: %q, %v", data, err)
+	}
+	info, err := os.Lstat(link)
+	if err != nil || info.Mode()&fs.ModeSymlink != 0 || info.Mode()&fs.ModeIrregular == 0 {
+		t.Errorf("a junction should be neither a symbolic link nor a plain directory to Go: %v, %v", info.Mode(), err)
+	}
+	if resolved, err := filepath.EvalSymlinks(link); err != nil || resolved != link {
+		t.Errorf("resolving links is expected to leave a junction in the path: %q, %v", resolved, err)
+	}
+	// Removing the junction removes the entry, not what it leads to.
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "inside.txt")); err != nil {
+		t.Errorf("the target lost its file: %v", err)
 	}
 }
 

@@ -2,8 +2,10 @@ package engine
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -140,6 +142,123 @@ func TestGuardPaths(t *testing.T) {
 	}
 }
 
+// attempt runs every mutating primitive against path and returns those the
+// guard did not stop.
+func attempt(path string) []string {
+	var leaked []string
+	check := func(name string, err error) {
+		var sandboxErr *SandboxError
+		if !errors.As(err, &sandboxErr) {
+			leaked = append(leaked, fmt.Sprintf("%s: %v", name, err))
+		}
+	}
+	check("WriteFile", WriteFile(path, []byte("ESCAPED"), FilePerm))
+	check("Mkdir", Mkdir(path))
+	check("RemoveFile", RemoveFile(path))
+	_, err := RemoveEmptyDir(path)
+	check("RemoveEmptyDir", err)
+	check("removeEmptiedDir", removeEmptiedDir(path))
+	return leaked
+}
+
+// TestGuardSpellings tries the ways a path can be written so that it looks
+// like one thing and is another. Every spelling of a place outside the
+// sandbox must be stopped for every operation, every spelling of a place
+// inside must be let through, and so must every spelling of the sandbox
+// variable itself.
+func TestGuardSpellings(t *testing.T) {
+	home := testenv.New(t)
+	other := outside(t)
+	if err := os.WriteFile(filepath.Join(other, "victim.txt"), []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(other, "victim-dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home.Dir, "sub", "deep"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sep := string(filepath.Separator)
+	toOther, err := filepath.Rel(home.Dir, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := testenv.Snapshot(t, other)
+
+	outsideSpellings := map[string]string{
+		"existing file elsewhere":             filepath.Join(other, "victim.txt"),
+		"existing directory elsewhere":        filepath.Join(other, "victim-dir"),
+		"new name elsewhere":                  filepath.Join(other, "new.txt"),
+		"dot-dot from the sandbox":            home.Dir + sep + toOther + sep + "victim.txt",
+		"dot-dot from a subdirectory":         home.Dir + sep + "sub" + sep + "deep" + sep + ".." + sep + ".." + sep + toOther + sep + "victim.txt",
+		"dot-dot through a missing directory": home.Dir + sep + "nope" + sep + ".." + sep + toOther + sep + "victim.txt",
+		"the sandbox itself":                  home.Dir,
+		"the sandbox with a separator":        home.Dir + sep,
+		"the sandbox with a dot":              home.Dir + sep + ".",
+		"the parent of the sandbox":           filepath.Dir(home.Dir),
+		"a sibling with the same beginning":   home.Dir + "x" + sep + "a.txt",
+		"elsewhere with a separator":          filepath.Join(other, "victim-dir") + sep,
+	}
+	for name, path := range windowsOutsideSpellings(home.Dir, other) {
+		outsideSpellings[name] = path
+	}
+	for name, path := range outsideSpellings {
+		if leaked := attempt(path); len(leaked) > 0 {
+			t.Errorf("outside, %s (%s): not stopped: %v", name, path, leaked)
+		}
+	}
+	// Other drives and devices are only shown to the guard itself: this test
+	// must not be able to write there even if the guard were wrong.
+	for name, path := range windowsFarAway(home.Dir, other) {
+		var sandboxErr *SandboxError
+		if err := guard("write", path); !errors.As(err, &sandboxErr) {
+			t.Errorf("outside, %s (%s): guard = %v", name, path, err)
+		}
+	}
+	if after := testenv.Snapshot(t, other); !reflect.DeepEqual(after, before) {
+		t.Fatalf("the directory outside the sandbox changed: %v", after)
+	}
+
+	insideSpellings := map[string]string{
+		"plain":                 filepath.Join(home.Dir, "a.txt"),
+		"dot-dot staying in":    home.Dir + sep + "sub" + sep + ".." + sep + "b.txt",
+		"double separator":      home.Dir + sep + sep + "c.txt",
+		"dot element":           home.Dir + sep + "." + sep + "d.txt",
+		"in a subdirectory":     filepath.Join(home.Dir, "sub", "deep", "e.txt"),
+		"out and back in again": home.Dir + sep + ".." + sep + filepath.Base(home.Dir) + sep + "f.txt",
+	}
+	if runtime.GOOS == "windows" {
+		insideSpellings["upper case"] = filepath.Join(strings.ToUpper(home.Dir), "G.TXT")
+		insideSpellings["lower case"] = filepath.Join(strings.ToLower(home.Dir), "h.txt")
+		insideSpellings["forward slashes"] = filepath.ToSlash(home.Dir) + "/i.txt"
+	}
+	for name, path := range insideSpellings {
+		if err := WriteFile(path, []byte("in"), FilePerm); err != nil {
+			t.Errorf("inside, %s (%s): refused: %v", name, path, err)
+		}
+	}
+
+	sandboxSpellings := map[string]string{
+		"with a separator at the end": home.Dir + sep,
+		"with dot-dot":                home.Dir + sep + "sub" + sep + "..",
+	}
+	if runtime.GOOS == "windows" {
+		sandboxSpellings["in upper case"] = strings.ToUpper(home.Dir)
+	}
+	for name, value := range sandboxSpellings {
+		t.Setenv(SandboxEnv, value)
+		if err := WriteFile(filepath.Join(home.Dir, "z.txt"), []byte("in"), FilePerm); err != nil {
+			t.Errorf("the sandbox spelled %s: a write inside was refused: %v", name, err)
+		}
+		if leaked := attempt(filepath.Join(other, "victim.txt")); len(leaked) > 0 {
+			t.Errorf("the sandbox spelled %s: a write outside was not stopped: %v", name, leaked)
+		}
+	}
+	if after := testenv.Snapshot(t, other); !reflect.DeepEqual(after, before) {
+		t.Fatalf("the directory outside the sandbox changed: %v", after)
+	}
+}
+
 func TestGuardIgnoresCaseOnWindows(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("file names are case-sensitive here")
@@ -165,6 +284,83 @@ func TestGuardFollowsLinksOutOfTheSandbox(t *testing.T) {
 	// The link itself is an entry of the sandbox and may be removed.
 	if err := RemoveFile(link); err != nil {
 		t.Errorf("removing the link itself: %v", err)
+	}
+}
+
+// TestGuardStopsAtJunctions is the Windows case the link test cannot cover: a
+// directory junction needs no privilege, and resolving symbolic links does not
+// follow it, so the path stays inside the sandbox letter by letter while the
+// write would land outside.
+func TestGuardStopsAtJunctions(t *testing.T) {
+	home := testenv.New(t)
+	other := outside(t)
+	victim := filepath.Join(other, "victim.txt")
+	if err := os.WriteFile(victim, []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(other, "victim-dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(home.Dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	before := testenv.Snapshot(t, other)
+	unchanged := func(when string) {
+		t.Helper()
+		if after := testenv.Snapshot(t, other); !reflect.DeepEqual(after, before) {
+			t.Fatalf("%s: the directory outside the sandbox changed: %v", when, after)
+		}
+	}
+
+	for _, link := range []string{filepath.Join(home.Dir, "junction"), filepath.Join(home.Dir, "sub", "junction")} {
+		testenv.Junction(t, other, link)
+		if data, err := os.ReadFile(filepath.Join(link, "victim.txt")); err != nil || string(data) != "keep me" {
+			t.Fatalf("the junction does not lead out of the sandbox: %q, %v", data, err)
+		}
+
+		mustSandboxError(t, WriteFile(filepath.Join(link, "victim.txt"), []byte("overwritten"), FilePerm))
+		mustSandboxError(t, WriteFile(filepath.Join(link, "new.txt"), []byte("new"), FilePerm))
+		mustSandboxError(t, WriteFile(filepath.Join(link, "a", "b", "new.txt"), []byte("new"), FilePerm))
+		mustSandboxError(t, Mkdir(filepath.Join(link, "new-dir")))
+		mustSandboxError(t, Mkdir(filepath.Join(link, "a", "b")))
+		mustSandboxError(t, RemoveFile(filepath.Join(link, "victim.txt")))
+		_, err := RemoveEmptyDir(filepath.Join(link, "victim-dir"))
+		mustSandboxError(t, err)
+		mustSandboxError(t, removeEmptiedDir(filepath.Join(link, "victim-dir")))
+		unchanged("writes through " + link)
+
+		// The junction itself is an entry of the sandbox: it may be removed,
+		// and removing it does not touch what it leads to.
+		if _, err := RemoveEmptyDir(link); err == nil {
+			t.Error("RemoveEmptyDir took a junction for a directory of the sandbox")
+		}
+		if err := RemoveFile(link); err != nil {
+			t.Errorf("removing the junction itself: %v", err)
+		}
+		if _, err := os.Lstat(link); !os.IsNotExist(err) {
+			t.Errorf("the junction is still there: %v", err)
+		}
+		unchanged("removing " + link)
+	}
+}
+
+// TestSandboxStopsAnApplyThroughAJunction puts the junction where a real
+// installation would meet one: LOCALAPPDATA itself leads somewhere else.
+func TestSandboxStopsAnApplyThroughAJunction(t *testing.T) {
+	s := newSite(t, "")
+	other := outside(t)
+	if err := os.Mkdir(filepath.Dir(s.home.LocalAppData), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testenv.Junction(t, other, s.home.LocalAppData)
+
+	plan := mustPlan(t, s.request("init v1\n"))
+	mustSandboxError(t, plan.Apply())
+	if entries, _ := os.ReadDir(other); len(entries) != 0 {
+		t.Errorf("the apply wrote through the junction: %v", entries)
+	}
+	if err := os.Remove(s.home.LocalAppData); err != nil {
+		t.Fatal(err)
 	}
 }
 

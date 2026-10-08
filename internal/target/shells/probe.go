@@ -1,9 +1,11 @@
 package shells
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -31,12 +33,27 @@ func (r ProbeResult) blocks() bool {
 }
 
 // Prober asks a PowerShell for its profile path and execution policy. It is an
-// interface so that tests never start a process: they pass a fake, or set the
-// SERENO_*_PROFILE_PATH variables, in which case no prober is consulted.
+// interface so that tests never start a PowerShell: they pass a fake, or set
+// the SERENO_*_PROFILE_PATH variables, in which case no prober is consulted.
 type Prober interface {
-	// Probe runs the PowerShell at the given full path once.
+	// Probe runs the PowerShell at the given full path once. Two outcomes
+	// have errors of their own, because the user can do something about
+	// them: ErrNoProfilePath and ErrProbeTimeout.
 	Probe(program string) (ProbeResult, error)
 }
+
+// ProbeTimeout is how long the probe may take. A PowerShell that starts at
+// all answers in a second or two; one that hangs must not hang sereno.
+const ProbeTimeout = 15 * time.Second
+
+// ErrNoProfilePath says that PowerShell printed its execution policy and no
+// profile path. That is what it does when the Documents folder of the user
+// does not exist or cannot be reached (a redirected folder that is offline).
+var ErrNoProfilePath = errors.New("PowerShell reported no profile path")
+
+// ErrProbeTimeout says that PowerShell did not answer within ProbeTimeout
+// and was stopped.
+var ErrProbeTimeout = errors.New("PowerShell did not answer in time")
 
 // policies are the values Get-ExecutionPolicy can print.
 var policies = []string{"Restricted", "AllSigned", "RemoteSigned", "Unrestricted", "Bypass", "Undefined", "Default"}
@@ -53,15 +70,13 @@ func ParseProbe(output string) (ProbeResult, error) {
 			lines = append(lines, line)
 		}
 	}
+	if len(lines) == 1 && policyNamed(lines[0]) != "" {
+		return ProbeResult{}, ErrNoProfilePath
+	}
 	if len(lines) != 2 {
 		return ProbeResult{}, fmt.Errorf("expected the profile path and the execution policy, got %d lines", len(lines))
 	}
-	result := ProbeResult{ProfilePath: lines[0]}
-	for _, policy := range policies {
-		if strings.EqualFold(policy, lines[1]) {
-			result.Policy = policy
-		}
-	}
+	result := ProbeResult{ProfilePath: lines[0], Policy: policyNamed(lines[1])}
 	if result.Policy == "" {
 		return ProbeResult{}, fmt.Errorf("%q is not an execution policy", lines[1])
 	}
@@ -75,4 +90,15 @@ func ParseProbe(output string) (ProbeResult, error) {
 	}
 	result.ProfilePath = filepath.Clean(result.ProfilePath)
 	return result, nil
+}
+
+// policyNamed returns the execution policy a line names, in its canonical
+// spelling, or "" when the line is something else.
+func policyNamed(line string) string {
+	for _, policy := range policies {
+		if strings.EqualFold(policy, line) {
+			return policy
+		}
+	}
+	return ""
 }

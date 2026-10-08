@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -185,9 +186,37 @@ func Fixture(t testing.TB, name string) string {
 	return dir
 }
 
+// aliases maps the short directory names a fixture tree may use at its top
+// level to the places they stand for inside a home, with forward slashes.
+//
+// They exist because of one number. Git for Windows cannot check out a path
+// longer than 260 characters unless core.longpaths is set, and the package
+// folder of Windows Terminal alone is 40 characters long: with the real
+// names in the repository, a clone into a deep directory failed half way.
+// A test in internal/policy keeps every path of the repository short; the
+// long names appear only in the temporary home that CopyTree fills.
+var aliases = map[string]string{
+	// Where Windows Terminal keeps settings.json and state.json (R16, R37).
+	"@wt-state": "AppData/Local/Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState",
+	// Where fragments live, one folder per application (R16).
+	"@wt-fragments": "AppData/Local/Microsoft/Windows Terminal/Fragments",
+}
+
+// expand replaces an alias at the start of a relative path by the place it
+// stands for (see aliases).
+func expand(rel string) string {
+	first, rest, _ := strings.Cut(filepath.ToSlash(rel), "/")
+	long, ok := aliases[first]
+	if !ok {
+		return rel
+	}
+	return filepath.Join(filepath.FromSlash(long), filepath.FromSlash(rest))
+}
+
 // CopyTree copies the directories and regular files below src into dst, which
-// must already exist. Files named .gitkeep are skipped: they only make Git
-// keep an otherwise empty fixture directory.
+// must already exist. A top-level directory with the name of an alias (see
+// aliases) is copied to the place the alias stands for. Files named .gitkeep
+// are skipped: they only make Git keep an otherwise empty fixture directory.
 func CopyTree(t testing.TB, src, dst string) {
 	t.Helper()
 	err := filepath.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
@@ -198,7 +227,7 @@ func CopyTree(t testing.TB, src, dst string) {
 		if err != nil || rel == "." {
 			return err
 		}
-		target := filepath.Join(dst, rel)
+		target := filepath.Join(dst, expand(rel))
 		if entry.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}

@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -710,24 +711,41 @@ func TestPlanUntracked(t *testing.T) {
 	}
 }
 
-// TestOpLines pins the layout of R14.
+// TestOpLines pins the layout of R14. The translation here is a table: it
+// fails the test when it is asked for a key that is not a note.
 func TestOpLines(t *testing.T) {
+	texts := map[string]string{
+		NoteKept:         "already as wanted",
+		NoteHookRemoved:  "hook line removed",
+		NoteHookReplaces: "replaces the sereno line that is there",
+		NoteBackupOf:     "copy of %s from before the hook line",
+	}
+	translate := func(key string, args ...any) string {
+		format, ok := texts[key]
+		if !ok {
+			t.Errorf("the translation was asked for %q", key)
+		}
+		return fmt.Sprintf(format, args...)
+	}
 	tests := []struct {
 		op   Op
-		note string
 		want []string
 	}{
-		{Op{Verb: VerbMkdir, Path: "/r/shell"}, "", []string{"  mkdir   /r/shell"}},
-		{Op{Verb: VerbReplace, Path: "/r/mode"}, "", []string{"  replace /r/mode"}},
-		{Op{Verb: VerbKeep, Path: "/r/mode"}, "already as wanted", []string{"  keep    /r/mode (already as wanted)"}},
-		{Op{Verb: VerbAppend, Path: "/h/.bashrc", Added: []string{"L # sereno:hook"}}, "",
+		{Op{Verb: VerbMkdir, Path: "/r/shell"}, []string{"  mkdir   /r/shell"}},
+		{Op{Verb: VerbReplace, Path: "/r/mode"}, []string{"  replace /r/mode"}},
+		{Op{Verb: VerbKeep, Path: "/r/mode", Note: NewNote(NoteKept)}, []string{"  keep    /r/mode (already as wanted)"}},
+		{Op{Verb: VerbCreate, Path: "/r/backups/b.bak", Note: NewNote(NoteBackupOf, "/h/.bashrc")},
+			[]string{"  create  /r/backups/b.bak (copy of /h/.bashrc from before the hook line)"}},
+		{Op{Verb: VerbAppend, Path: "/h/.bashrc", Added: []string{"L # sereno:hook"}},
 			[]string{"  append  /h/.bashrc", "          + L # sereno:hook"}},
-		{Op{Verb: VerbReplace, Path: "/h/.bashrc", Removed: []string{"L # sereno:hook"}}, "hook line removed",
+		{Op{Verb: VerbAppend, Path: "/h/.bashrc", Note: NewNote(NoteHookReplaces), Added: []string{"new # sereno:hook"}, Removed: []string{"old # sereno:hook"}},
+			[]string{"  append  /h/.bashrc (replaces the sereno line that is there)", "          - old # sereno:hook", "          + new # sereno:hook"}},
+		{Op{Verb: VerbReplace, Path: "/h/.bashrc", Note: NewNote(NoteHookRemoved), Removed: []string{"L # sereno:hook"}},
 			[]string{"  replace /h/.bashrc (hook line removed)", "          - L # sereno:hook"}},
-		{Op{Verb: VerbRmdir, Path: "/r"}, "", []string{"  rmdir   /r"}},
+		{Op{Verb: VerbRmdir, Path: "/r"}, []string{"  rmdir   /r"}},
 	}
 	for _, test := range tests {
-		if got := test.op.Lines(test.note); !reflect.DeepEqual(got, test.want) {
+		if got := test.op.Lines(translate); !reflect.DeepEqual(got, test.want) {
 			t.Errorf("Lines = %q, want %q", got, test.want)
 		}
 	}
@@ -735,10 +753,21 @@ func TestOpLines(t *testing.T) {
 		if len(verb) > 7 {
 			t.Errorf("verb %q does not fit 8 columns with a space after it", verb)
 		}
-		line := Op{Verb: verb, Path: "/p"}.Lines("")[0]
-		if strings.Index(line, "/p") != 10 {
-			t.Errorf("%q: the path does not start in column 11", line)
+		line := Op{Verb: verb, Path: "/p"}.Lines(translate)[0]
+		if strings.Index(line, "/p") != 10 || line != strings.TrimRight(line, " ") {
+			t.Errorf("%q: the path does not start in column 11, or the line has a tail", line)
 		}
+	}
+
+	// Without a translation the key stands in, and no note is still no note.
+	if got := (Op{Verb: VerbKeep, Path: "/p", Note: NewNote(NoteKept)}).Lines(nil)[0]; got != "  keep    /p ("+NoteKept+")" {
+		t.Errorf("Lines(nil) = %q", got)
+	}
+	if got := (Op{Verb: VerbKeep, Path: "/p"}).Lines(nil)[0]; got != "  keep    /p" {
+		t.Errorf("Lines(nil) without a note = %q", got)
+	}
+	if (Note{}).Text(translate) != "" || NewNote(NoteKept).Text(nil) != NoteKept || NewNote(NoteBackupOf, "X").Text(translate) != "copy of X from before the hook line" {
+		t.Error("Note.Text is wrong")
 	}
 }
 
@@ -752,14 +781,65 @@ func TestExitCodes(t *testing.T) {
 	}{
 		{Plan{}, ExitOK},
 		{Plan{Ops: []Op{{Verb: VerbKeep}, {Verb: VerbCreate}}}, ExitOK},
-		{Plan{Ops: []Op{{Verb: VerbCreate}, {Verb: VerbSkip}}}, ExitIncomplete},
-		{Plan{Ops: []Op{{Verb: VerbSkip}}, Refusals: []Refusal{{}}}, ExitRefused},
+		{Plan{Ops: []Op{{Verb: VerbCreate}, {Verb: VerbSkip, Incomplete: true}}}, ExitIncomplete},
+		// A skip that only informs (no Windows Terminal, no fragment: R16)
+		// is not a failure.
+		{Plan{Ops: []Op{{Verb: VerbCreate}, {Verb: VerbSkip}}}, ExitOK},
+		{Plan{Ops: []Op{{Verb: VerbSkip, Incomplete: true}}, Refusals: []Refusal{{}}}, ExitRefused},
 	}
 	for _, test := range tests {
 		if got := test.plan.ExitCode(); got != test.want {
 			t.Errorf("ExitCode = %d, want %d", got, test.want)
 		}
 	}
+}
+
+// TestSkippedFile is R16 seen from the engine: a file the caller decides not
+// to write appears in the plan, in its place, with the caller's note; nothing
+// is written or recorded for it and the exit code stays 0.
+func TestSkippedFile(t *testing.T) {
+	s := newSite(t, "")
+	note := NewNote("plan.note.kept") // any key; the engine does not look at it
+	req := s.request("init v1\n")
+	req.Files[2].Skip = note
+	plan := mustApply(t, req)
+	want := []string{
+		"mkdir AppData",
+		"mkdir AppData/Local",
+		"mkdir AppData/Local/sereno",
+		"mkdir AppData/Local/sereno/shell",
+		"create AppData/Local/sereno/manifest.json",
+		"create AppData/Local/sereno/shell/init.bash",
+		"create AppData/Local/sereno/mode",
+		"skip AppData/Local/Microsoft/Windows Terminal/Fragments/SerenaTerminal/sereno.json",
+	}
+	if got := verbs(s, plan); !reflect.DeepEqual(got, want) {
+		t.Errorf("operations:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	last := plan.Ops[len(plan.Ops)-1]
+	if !reflect.DeepEqual(last.Note, note) || last.Incomplete || last.Changes() {
+		t.Errorf("the skip line = %+v", last)
+	}
+	if plan.ExitCode() != ExitOK || plan.Incomplete() != 0 {
+		t.Errorf("exit %d", plan.ExitCode())
+	}
+	if _, err := os.Lstat(filepath.Dir(filepath.Dir(s.outside))); !os.IsNotExist(err) {
+		t.Error("directories were created for a file that is skipped")
+	}
+	m, _, _ := LoadManifest(s.root)
+	if _, recorded := m.Owned[s.outside]; recorded || len(m.Owned) != 2 {
+		t.Errorf("owned = %v", m.Owned)
+	}
+
+	// A file that was written before and is skipped now stays recorded, and
+	// uninstall still removes it.
+	mustApply(t, s.request("init v1\n"))
+	again := mustApply(t, req)
+	if again.Changes() != 0 || read(t, s.outside) != "{}\n" {
+		t.Errorf("skipping changed something: %v", verbs(s, again))
+	}
+	mustUninstall(t, UninstallRequest{Root: s.root})
+	sameTree(t, map[string]string{}, s.home.Dir, "after uninstall")
 }
 
 // TestSandboxStopsAnApply makes sure a plan cannot write outside the sandbox

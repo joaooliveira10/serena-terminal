@@ -22,15 +22,15 @@ func (r Request) validate() error {
 		return fmt.Errorf("plan: root %q is not an absolute path", r.Root)
 	}
 	manifest := filepath.Join(r.Root, ManifestName)
-	seen := map[string]bool{manifest: true}
+	seen := map[string]bool{pathKey(manifest): true}
 	for _, f := range r.Files {
 		if !filepath.IsAbs(f.Path) {
 			return fmt.Errorf("plan: file path %q is not absolute", f.Path)
 		}
-		if seen[f.Path] {
+		if seen[pathKey(f.Path)] {
 			return fmt.Errorf("plan: %s is listed twice or is the manifest", f.Path)
 		}
-		seen[f.Path] = true
+		seen[pathKey(f.Path)] = true
 	}
 	shells := map[string]bool{}
 	for _, h := range r.Hooks {
@@ -38,10 +38,10 @@ func (r Request) validate() error {
 			return fmt.Errorf("plan: hook shell %q is malformed or listed twice", h.Shell)
 		}
 		shells[h.Shell] = true
-		if !filepath.IsAbs(h.Path) || seen[h.Path] {
+		if !filepath.IsAbs(h.Path) || seen[pathKey(h.Path)] {
 			return fmt.Errorf("plan: hook path %q is not absolute, is an owned file or is the target of two hooks", h.Path)
 		}
-		seen[h.Path] = true
+		seen[pathKey(h.Path)] = true
 		if err := checkHookLine(h.Line); err != nil {
 			return fmt.Errorf("plan: hook line for %s: %w", h.Shell, err)
 		}
@@ -66,9 +66,9 @@ func checkHookLine(text string) error {
 // builder collects the operations of an apply in the phases of R13.
 type builder struct {
 	root    string
-	old     *Manifest // as read; never modified
-	next    *Manifest // as it will be written
-	planned map[string]bool
+	old     *Manifest       // as read; never modified
+	next    *Manifest       // as it will be written
+	planned map[string]bool // directories an earlier operation creates, by pathKey
 
 	mkdirs, backups, files, hooks []Op
 	refusals                      []Refusal
@@ -86,6 +86,11 @@ type builder struct {
 // Operations are ordered as phase 2 performs them: directories, backups of
 // profiles about to be edited, the manifest (already listing the hashes about
 // to be written), owned files, hook lines.
+//
+// A path the manifest already records is taken in the spelling recorded
+// there. On Windows, where file names ignore letter case, the same folder
+// named in another case is therefore the same installation and not a foreign
+// file in the way.
 func PlanApply(req Request) (*Plan, error) {
 	if err := req.validate(); err != nil {
 		return nil, err
@@ -102,8 +107,15 @@ func PlanApply(req Request) (*Plan, error) {
 	b.refusals = append(b.refusals, req.Refusals...)
 
 	manifestPath := filepath.Join(req.Root, ManifestName)
-	b.needDirs(manifestPath, b.next.addDir)
+	b.needDirs(manifestPath, b.ownedDir)
+	recorded := map[string]string{}
+	for path := range old.Owned {
+		recorded[pathKey(path)] = path
+	}
 	for _, f := range req.Files {
+		if spelling, ok := recorded[pathKey(f.Path)]; ok {
+			f.Path = spelling
+		}
 		if err := b.file(f); err != nil {
 			return nil, err
 		}
@@ -111,14 +123,15 @@ func PlanApply(req Request) (*Plan, error) {
 	for _, h := range req.Hooks {
 		b.hook(h)
 	}
-	manifestOp, err := b.manifest(manifestPath)
+	manifestOp, book, err := b.manifest(manifestPath)
 	if err != nil {
 		return nil, err
 	}
 
-	plan := &Plan{Root: req.Root, Refusals: b.refusals}
+	plan := &Plan{Root: req.Root, Refusals: b.refusals, ledger: book}
 	plan.Ops = append(plan.Ops, b.mkdirs...)
 	plan.Ops = append(plan.Ops, b.backups...)
+	book.index = len(plan.Ops)
 	plan.Ops = append(plan.Ops, manifestOp)
 	plan.Ops = append(plan.Ops, b.files...)
 	plan.Ops = append(plan.Ops, b.hooks...)
@@ -129,13 +142,22 @@ func (b *builder) refuse(path string, reason Note) {
 	b.refusals = append(b.refusals, Refusal{Path: path, Reason: reason})
 }
 
+// ownedDir records a directory that is about to be created for an owned file
+// and returns what takes the record back.
+func (b *builder) ownedDir(dir string) func(*Manifest) {
+	b.next.addDir(dir)
+	return func(m *Manifest) { m.dropDir(dir) }
+}
+
 // needDirs plans the creation of the directories missing above path, top
-// down, and reports each to record. It returns false, after adding a refusal,
-// when something that is not a directory is in the way.
-func (b *builder) needDirs(path string, record func(string)) bool {
+// down. record notes each of them where it belongs and returns the function
+// that takes the note out of a manifest again (see Op.undo). needDirs returns
+// false, after adding a refusal, when something that is not a directory is
+// in the way.
+func (b *builder) needDirs(path string, record func(dir string) func(*Manifest)) bool {
 	var missing []string
 	dir := filepath.Dir(path)
-	for !b.planned[dir] {
+	for !b.planned[pathKey(dir)] {
 		info, err := os.Stat(dir)
 		if err == nil {
 			if !info.IsDir() {
@@ -157,23 +179,37 @@ func (b *builder) needDirs(path string, record func(string)) bool {
 		dir = parent
 	}
 	for i := len(missing) - 1; i >= 0; i-- {
-		b.planned[missing[i]] = true
-		b.mkdirs = append(b.mkdirs, Op{Verb: VerbMkdir, Path: missing[i], act: action{kind: actMkdir}})
-		record(missing[i])
+		b.planned[pathKey(missing[i])] = true
+		b.mkdirs = append(b.mkdirs, Op{Verb: VerbMkdir, Path: missing[i], act: action{kind: actMkdir}, undo: record(missing[i])})
 	}
 	return true
 }
 
 // file applies the ownership rules of R15 to one owned file.
 func (b *builder) file(f File) error {
+	if !f.Skip.IsZero() {
+		b.files = append(b.files, Op{Verb: VerbSkip, Path: f.Path, Note: f.Skip})
+		return nil
+	}
 	sum := SHA256(f.Data)
 	recorded, tracked := b.old.Owned[f.Path]
+	// record puts the new hash into the manifest and returns what puts the
+	// old state back if the file is not written after all.
+	record := func() func(*Manifest) {
+		b.next.Owned[f.Path] = sum
+		return func(m *Manifest) {
+			if tracked {
+				m.Owned[f.Path] = recorded
+			} else {
+				delete(m.Owned, f.Path)
+			}
+		}
+	}
 	info, err := os.Lstat(f.Path)
 	switch {
 	case isMissing(err):
-		if b.needDirs(f.Path, b.next.addDir) {
-			b.files = append(b.files, Op{Verb: VerbCreate, Path: f.Path, act: writeNew(f.Data, FilePerm)})
-			b.next.Owned[f.Path] = sum
+		if b.needDirs(f.Path, b.ownedDir) {
+			b.files = append(b.files, Op{Verb: VerbCreate, Path: f.Path, act: writeNew(f.Data, FilePerm), undo: record()})
 		}
 	case err != nil:
 		return fmt.Errorf("inspect %s: %w", f.Path, err)
@@ -188,12 +224,11 @@ func (b *builder) file(f File) error {
 		}
 		switch {
 		case current != recorded:
-			b.files = append(b.files, Op{Verb: VerbSkip, Path: f.Path, Note: NewNote(NoteEdited)})
+			b.files = append(b.files, Op{Verb: VerbSkip, Path: f.Path, Note: NewNote(NoteEdited), Incomplete: true})
 		case current == sum:
 			b.files = append(b.files, Op{Verb: VerbKeep, Path: f.Path, Note: NewNote(NoteKept)})
 		default:
-			b.files = append(b.files, Op{Verb: VerbReplace, Path: f.Path, act: writeOver(f.Data, FilePerm, current)})
-			b.next.Owned[f.Path] = sum
+			b.files = append(b.files, Op{Verb: VerbReplace, Path: f.Path, act: writeOver(f.Data, FilePerm, current), undo: record()})
 		}
 	}
 	return nil
@@ -201,16 +236,26 @@ func (b *builder) file(f File) error {
 
 // hook plans one hook line (R22).
 func (b *builder) hook(h Hook) {
-	record, had := b.old.Hook(h.Shell)
-	if had && record.Path != h.Path {
-		b.refuse(h.Path, NewNote(ReasonHookMoved, h.Shell, record.Path))
+	prev, had := b.old.Hook(h.Shell)
+	if had && !samePath(prev.Path, h.Path) {
+		b.refuse(h.Path, NewNote(ReasonHookMoved, h.Shell, prev.Path))
 		return
 	}
-	p, reason := readProfile(h.Path)
-	if !reason.IsZero() {
+	if had {
+		h.Path = prev.Path
+	}
+	// A profile sereno will not edit is a refusal that shows the line, so
+	// that the user can add it by hand.
+	refuse := func(reason Note) {
 		b.refusals = append(b.refusals, Refusal{Path: h.Path, Reason: reason, Advice: NewNote(AdviceAddByHand), Text: h.Line})
+	}
+	p, reason := readProfile(h.Path, MaxProfileSize)
+	if !reason.IsZero() {
+		refuse(reason)
 		return
 	}
+	record := prev
+	record.DirsCreated = append([]string{}, prev.DirsCreated...)
 	if !had {
 		record = HookRecord{Shell: h.Shell, Path: h.Path, FileCreated: !p.exists}
 		if p.exists {
@@ -219,54 +264,98 @@ func (b *builder) hook(h Hook) {
 	}
 
 	edit := editHook(p, record.Inserted, h.Line, h.NewFileCRLF)
+	if edit.action == hookAppend || edit.action == hookReplace {
+		switch {
+		case p.readOnly:
+			refuse(NewNote(ReasonReadOnly))
+			return
+		case len(edit.after) > MaxProfileSize:
+			// The file is within the limit, but would not be with the line:
+			// sereno would refuse its own result at the next run.
+			refuse(NewNote(ReasonNoRoom))
+			return
+		}
+	}
 	record.Inserted = edit.inserted
+
+	// undo takes the line out of a manifest when it did not reach the file.
+	// What was created on the way stays recorded, so that uninstall finds
+	// it: the directories made for a new profile and the backup of an
+	// existing one. A record that holds neither is dropped.
+	undo := func(m *Manifest) {
+		current, ok := m.Hook(h.Shell)
+		if !ok {
+			return
+		}
+		current.Inserted = append([]byte{}, prev.Inserted...)
+		if !had && len(current.DirsCreated) == 0 && current.Backup == "" {
+			m.removeHook(h.Shell)
+			return
+		}
+		m.setHook(current)
+	}
+
 	switch edit.action {
 	case hookKeep:
 		b.hooks = append(b.hooks, Op{Verb: VerbKeep, Path: h.Path, Note: NewNote(NoteHookPresent)})
 	case hookCreate:
-		created := func(dir string) {
-			for _, known := range record.DirsCreated {
-				if known == dir {
-					return
-				}
-			}
-			record.DirsCreated = append(record.DirsCreated, dir)
+		created := func(dir string) func(*Manifest) {
+			record.DirsCreated = withPath(record.DirsCreated, dir)
+			return func(m *Manifest) { m.dropHookDir(h.Shell, dir) }
 		}
 		if !b.needDirs(h.Path, created) {
 			return
 		}
-		b.hooks = append(b.hooks, Op{Verb: VerbCreate, Path: h.Path, Note: h.CreateNote, Added: []string{h.Line}, act: writeNew(edit.after, FilePerm)})
+		b.hooks = append(b.hooks, Op{Verb: VerbCreate, Path: h.Path, Note: h.CreateNote, Added: []string{h.Line}, act: writeNew(edit.after, FilePerm), undo: undo})
 	case hookAppend, hookReplace:
 		current := SHA256(p.data)
 		if !record.FileCreated && record.Backup == "" {
 			// The first edit of a file that was there before sereno.
 			record.BeforeSHA256 = current
-			if !b.backup(&record, p.data) {
+			if !b.backup(&record, p, prev.BeforeSHA256) {
 				return
 			}
 		}
-		op := Op{Verb: VerbAppend, Path: h.Path, Added: []string{h.Line}, act: writeOver(edit.after, p.perm, current)}
+		op := Op{Verb: VerbAppend, Path: h.Path, Added: []string{h.Line}, act: writeOver(edit.after, p.perm, current), undo: undo}
 		if edit.action == hookReplace {
 			op.Note = NewNote(NoteHookReplaces)
+			op.Removed = []string{edit.replaced}
 		}
 		b.hooks = append(b.hooks, op)
 	}
 	b.next.setHook(record)
 }
 
+// backupPerm bounds the permission bits of a backup: those of the profile it
+// copies, and never more than an ordinary file has. A profile the user keeps
+// private (0600, with tokens in it) gets a private backup.
+const backupPerm = FilePerm
+
 // backup plans the copy of a profile into ROOT/backups before its first edit.
 // The name carries the hash of the content, so a backup left by an earlier
 // installation is never overwritten and an identical one is reused.
-func (b *builder) backup(record *HookRecord, data []byte) bool {
-	sum := SHA256(data)
-	path := filepath.Join(b.root, BackupsDir, record.Shell+"-"+sum[:16]+".bak")
+// hashBefore is what the record said about the file until now; it comes back
+// when the backup cannot be written.
+func (b *builder) backup(record *HookRecord, p profile, hashBefore string) bool {
+	sum := SHA256(p.data)
+	shell := record.Shell
+	path := filepath.Join(b.root, BackupsDir, shell+"-"+sum[:16]+".bak")
 	info, err := os.Lstat(path)
 	switch {
 	case isMissing(err):
-		if !b.needDirs(path, b.next.addDir) {
+		if !b.needDirs(path, b.ownedDir) {
 			return false
 		}
-		b.backups = append(b.backups, Op{Verb: VerbCreate, Path: path, Note: NewNote(NoteBackupOf, record.Path), act: writeNew(data, FilePerm)})
+		b.backups = append(b.backups, Op{
+			Verb: VerbCreate, Path: path, Note: NewNote(NoteBackupOf, record.Path),
+			act: writeNew(p.data, p.perm&backupPerm),
+			undo: func(m *Manifest) {
+				if current, ok := m.Hook(shell); ok {
+					current.Backup, current.BeforeSHA256 = "", hashBefore
+					m.setHook(current)
+				}
+			},
+		})
 	case err != nil || !info.Mode().IsRegular():
 		b.refuse(path, NewNote(ReasonBackupBlocked))
 		return false
@@ -280,8 +369,9 @@ func (b *builder) backup(record *HookRecord, data []byte) bool {
 	return true
 }
 
-// manifest plans the write of the manifest itself.
-func (b *builder) manifest(path string) (Op, error) {
+// manifest plans the write of the manifest itself and collects what Apply
+// needs to correct it if a later operation fails.
+func (b *builder) manifest(path string) (Op, *ledger, error) {
 	// Every recorded hook is also a recorded option, whatever the caller
 	// passed: the next apply must keep it (R13).
 	for _, record := range b.next.Hooks {
@@ -289,18 +379,22 @@ func (b *builder) manifest(path string) (Op, error) {
 	}
 	data, err := b.next.Encode()
 	if err != nil {
-		return Op{}, err
+		return Op{}, nil, err
 	}
+	book := &ledger{path: path, old: b.old, next: b.next, data: data}
 	current, err := os.ReadFile(path)
 	switch {
 	case isMissing(err):
-		return Op{Verb: VerbCreate, Path: path, act: writeNew(data, FilePerm)}, nil
+		book.before = action{absent: true}
+		return Op{Verb: VerbCreate, Path: path, act: writeNew(data, FilePerm)}, book, nil
 	case err != nil:
-		return Op{}, fmt.Errorf("read manifest: %w", err)
-	case bytes.Equal(current, data):
-		return Op{Verb: VerbKeep, Path: path, Note: NewNote(NoteKept)}, nil
+		return Op{}, nil, fmt.Errorf("read manifest: %w", err)
 	}
-	return Op{Verb: VerbReplace, Path: path, act: writeOver(data, FilePerm, SHA256(current))}, nil
+	book.before = action{sum: SHA256(current)}
+	if bytes.Equal(current, data) {
+		return Op{Verb: VerbKeep, Path: path, Note: NewNote(NoteKept)}, book, nil
+	}
+	return Op{Verb: VerbReplace, Path: path, act: writeOver(data, FilePerm, SHA256(current))}, book, nil
 }
 
 // PlanUntracked plans files that are written outside the manifest, which is
@@ -309,16 +403,17 @@ func (b *builder) manifest(path string) (Op, error) {
 // refusal. Nothing is recorded, so nothing here is removed by uninstall.
 func PlanUntracked(files []File) (*Plan, error) {
 	b := &builder{old: NewManifest(), next: NewManifest(), planned: map[string]bool{}}
+	unrecorded := func(string) func(*Manifest) { return nil }
 	seen := map[string]bool{}
 	for _, f := range files {
-		if !filepath.IsAbs(f.Path) || seen[f.Path] {
+		if !filepath.IsAbs(f.Path) || seen[pathKey(f.Path)] {
 			return nil, fmt.Errorf("plan: file path %q is not absolute or is listed twice", f.Path)
 		}
-		seen[f.Path] = true
+		seen[pathKey(f.Path)] = true
 		info, err := os.Lstat(f.Path)
 		switch {
 		case isMissing(err):
-			if b.needDirs(f.Path, func(string) {}) {
+			if b.needDirs(f.Path, unrecorded) {
 				b.files = append(b.files, Op{Verb: VerbCreate, Path: f.Path, act: writeNew(f.Data, FilePerm)})
 			}
 		case err != nil:

@@ -475,7 +475,7 @@ func TestParseProbe(t *testing.T) {
 }
 
 func TestMessageKeysExist(t *testing.T) {
-	for _, key := range []string{NoteBashProfile, ReasonAbsent, ReasonWindowsOnly, ReasonPolicy, ReasonRootNotASCII, AdvicePolicy} {
+	for _, key := range []string{NoteBashProfile, ReasonAbsent, ReasonWindowsOnly, ReasonPolicy, ReasonNoProfilePath, ReasonProbeTimeout, ReasonRootNotASCII, AdvicePolicy} {
 		if !i18n.Has(key) {
 			t.Errorf("message key %q is not in the catalogues", key)
 		}

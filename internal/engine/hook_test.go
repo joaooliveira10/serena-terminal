@@ -84,6 +84,25 @@ func TestEditHook(t *testing.T) {
 		{"recorded line changes", "a\nold # sereno:hook\n", "\nold # sereno:hook\n", hookReplace, "a\n" + line + "\n", "\n" + line + "\n"},
 		{"recorded line changes, user text after it", "a\nold # sereno:hook\nuser\n", "old # sereno:hook\n", hookReplace, "a\n" + line + "\nuser\n", line + "\n"},
 		{"recorded CRLF line changes", "a\r\nold # sereno:hook\r\n", "old # sereno:hook\r\n", hookReplace, "a\r\n" + line + "\r\n", line + "\r\n"},
+
+		// The recorded bytes count only where they stand as whole lines.
+		// Inside a line they are part of something the user wrote, and that
+		// line, which still ends with the marker, is replaced as a whole.
+		{"recorded line commented out", "a\n# " + line + "\nb\n", line + "\n", hookReplace, "a\n" + line + "\nb\n", line + "\n"},
+		{"recorded line behind a command", "a\ntrue; " + line + "\nb\n", line + "\n", hookReplace, "a\n" + line + "\nb\n", line + "\n"},
+		{"recorded line commented out in UTF-16LE", "\xff\xfe" + string(utf16le("a\r\n# "+line+"\r\nb\r\n")), string(utf16le(line + "\r\n")), hookReplace,
+			"\xff\xfe" + string(utf16le("a\r\n"+line+"\r\nb\r\n")), string(utf16le(line + "\r\n"))},
+		{"recorded bytes found later on a line of their own", "# " + line + "\n" + line + "\n", line + "\n", hookKeep, "", line + "\n"},
+		{"leading line ending recorded, text below: only the line changes", "a\nold # sereno:hook\nuser\n", "\nold # sereno:hook\n", hookReplace,
+			"a\n" + line + "\nuser\n", line + "\n"},
+		{"leading line ending recorded, text below, same line", "a\n" + line + "\nuser\n", "\n" + line + "\n", hookKeep, "", "\n" + line + "\n"},
+
+		// Only a line that ends with the marker is sereno's.
+		{"marker inside a command", "alias h='grep \"# sereno:hook\" f'\n", "", hookAppend, "alias h='grep \"# sereno:hook\" f'\n" + line + "\n", line + "\n"},
+		{"marker followed by more text", "# the # sereno:hook line is sereno's\n", "", hookAppend, "# the # sereno:hook line is sereno's\n" + line + "\n", line + "\n"},
+		{"marker without the space in front", "x# sereno:hook\n", "", hookAppend, "x# sereno:hook\n" + line + "\n", line + "\n"},
+		{"the marker alone", "# sereno:hook\n", "", hookAppend, "# sereno:hook\n" + line + "\n", line + "\n"},
+		{"blanks after the marker", "a\nold # sereno:hook \t\nb\n", "", hookReplace, "a\n" + line + "\nb\n", line + "\n"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -98,6 +117,31 @@ func TestEditHook(t *testing.T) {
 				t.Errorf("inserted = %q\n    want %q", edit.inserted, test.inserted)
 			}
 		})
+	}
+}
+
+// TestEditHookNamesTheLineItReplaces: the plan must be able to show the line
+// that goes, whichever of the two ways it was found.
+func TestEditHookNamesTheLineItReplaces(t *testing.T) {
+	const line = "L # sereno:hook"
+	tests := []struct {
+		name, before, recorded, replaced string
+	}{
+		{"by its recorded bytes", "a\nold # sereno:hook\n", "\nold # sereno:hook\n", "old # sereno:hook"},
+		{"by the marker", "a\n  old # sereno:hook \nb\n", "", "  old # sereno:hook "},
+		{"commented out", "a\n# " + line + "\n", line + "\n", "# " + line},
+		{"in UTF-16LE", "\xff\xfe" + string(utf16le("old # sereno:hook\r\n")), "", "old # sereno:hook"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			edit := editHook(existing(test.before), []byte(test.recorded), line, false)
+			if edit.action != hookReplace || edit.replaced != test.replaced {
+				t.Errorf("action %d, replaced %q; want a replacement of %q", edit.action, edit.replaced, test.replaced)
+			}
+		})
+	}
+	if edit := editHook(existing("a\n"), nil, line, false); edit.replaced != "" {
+		t.Errorf("an append replaces %q", edit.replaced)
 	}
 }
 
@@ -178,6 +222,30 @@ func TestRemoveHook(t *testing.T) {
 		{"backup differs elsewhere: only the bytes go", "a\n" + line + "\nUSER\n", line + "\n", "a\nold # sereno:hook\nb\n", "a\nUSER\n", []string{line}, false},
 		{"backup holds more than one line there", "a\n" + line + "\nb\n", line + "\n", "a\nx\nold # sereno:hook\nb\n", "a\nb\n", []string{line}, false},
 		{"backup holds a line without the marker there", "a\n" + line + "\nb\n", line + "\n", "a\nplain\nb\n", "a\nb\n", []string{line}, false},
+
+		// The recorded bytes inside a line are not cut out of it: the line,
+		// which ends with the marker, goes as a whole.
+		{"commented out", "a\n# " + line + "\nb\n", line + "\n", "-", "a\nb\n", []string{"# " + line}, false},
+		{"glued to a comment sign", "a\n#" + line + "\nb\n", line + "\n", "-", "a\nb\n", []string{"#" + line}, false},
+		{"behind a command", "a\ntrue; " + line + "\nb\n", line + "\n", "-", "a\nb\n", []string{"true; " + line}, false},
+		{"indented in a block", "if x; then\n  " + line + "\nfi\n", line + "\n", "-", "if x; then\nfi\n", []string{"  " + line}, false},
+		{"commented out in UTF-16LE", "\xff\xfe" + string(utf16le("a\r\n# "+line+"\r\nb\r\n")), string(utf16le(line + "\r\n")), "-",
+			"\xff\xfe" + string(utf16le("a\r\nb\r\n")), []string{"# " + line}, false},
+		{"a later occurrence on a line of its own", "# " + line + "\n" + line + "\nb\n", line + "\n", "-", "# " + line + "\nb\n", []string{line}, false},
+		{"commented out, backup at hand: no restore", "a\n# " + line + "\nb\n", line + "\n", "a\nold # sereno:hook\nb\n", "a\nb\n", []string{"# " + line}, false},
+
+		// A line ending sereno added in front stays with the line above once
+		// there is text below; an unterminated insertion takes its line along.
+		{"leading line ending, text below", "a\n" + line + "\nuser\n", "\n" + line + "\n", "-", "a\nuser\n", []string{line}, false},
+		{"leading CRLF, text below", "a\r\n" + line + "\r\nuser\r\n", "\r\n" + line + "\r\n", "-", "a\r\nuser\r\n", []string{line}, false},
+		{"leading line ending after a lone CR", "a\nb\r\n" + line + "\n", "\n" + line + "\n", "-", "a\nb\r", []string{line}, false},
+		{"unterminated insertion at the end", "a\n" + line, line, "-", "a\n", []string{line}, false},
+		{"unterminated insertion, text below", "a\n" + line + "\nuser\n", line, "-", "a\nuser\n", []string{line}, false},
+
+		// Lines of the user's own that mention the marker stay.
+		{"marker inside a command", "alias h='grep \"# sereno:hook\" f'\nb\n", line + "\n", "-", "alias h='grep \"# sereno:hook\" f'\nb\n", nil, false},
+		{"marker followed by more text", "# the # sereno:hook line\n  " + line + "\n", line + "\n", "-", "# the # sereno:hook line\n", []string{"  " + line}, false},
+		{"recorded bytes that are not an insertion", "a\nplain text\nb\n", "plain text\n", "-", "a\nplain text\nb\n", nil, false},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -240,10 +308,10 @@ func TestReadProfileRefusals(t *testing.T) {
 		return path(name)
 	}
 
-	if p, reason := readProfile(path("absent")); p.exists || !reason.IsZero() {
+	if p, reason := readProfile(path("absent"), MaxProfileSize); p.exists || !reason.IsZero() {
 		t.Errorf("an absent file: exists %v, reason %q", p.exists, reason.Key)
 	}
-	if p, reason := readProfile(write("ok", []byte("a\n"))); !p.exists || !reason.IsZero() || string(p.data) != "a\n" {
+	if p, reason := readProfile(write("ok", []byte("a\n")), MaxProfileSize); !p.exists || !reason.IsZero() || string(p.data) != "a\n" || p.readOnly {
 		t.Errorf("a regular file: %+v, reason %q", p, reason.Key)
 	}
 
@@ -266,24 +334,42 @@ func TestReadProfileRefusals(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			_, reason := readProfile(test.path)
+			_, reason := readProfile(test.path, MaxProfileSize)
 			if reason.Key != test.reason {
 				t.Errorf("reason = %q, want %q", reason.Key, test.reason)
 			}
 		})
 	}
 
+	t.Run("uninstall reads a profile of any size", func(t *testing.T) {
+		p, reason := readProfile(path("large"), anySize)
+		if !reason.IsZero() || !p.exists || len(p.data) != MaxProfileSize+1 {
+			t.Errorf("exists %v, %d bytes, reason %q", p.exists, len(p.data), reason.Key)
+		}
+	})
+	t.Run("a read-only file is read and marked", func(t *testing.T) {
+		locked := write("locked", []byte("a\n"))
+		if err := os.Chmod(locked, 0o444); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Chmod(locked, 0o644)
+		p, reason := readProfile(locked, MaxProfileSize)
+		if !reason.IsZero() || !p.exists || !p.readOnly || string(p.data) != "a\n" {
+			t.Errorf("%+v, reason %q", p, reason.Key)
+		}
+	})
+
 	t.Run("symbolic link", func(t *testing.T) {
 		link := path("link")
 		testenv.Symlink(t, path("ok"), link)
-		if _, reason := readProfile(link); reason.Key != ReasonSymlink {
+		if _, reason := readProfile(link, MaxProfileSize); reason.Key != ReasonSymlink {
 			t.Errorf("reason = %q, want %q", reason.Key, ReasonSymlink)
 		}
 	})
 	t.Run("dangling symbolic link", func(t *testing.T) {
 		link := path("dangling")
 		testenv.Symlink(t, path("nowhere"), link)
-		if _, reason := readProfile(link); reason.Key != ReasonSymlink {
+		if _, reason := readProfile(link, MaxProfileSize); reason.Key != ReasonSymlink {
 			t.Errorf("reason = %q, want %q", reason.Key, ReasonSymlink)
 		}
 	})

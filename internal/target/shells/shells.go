@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joaooliveira10/serena-terminal/internal/engine"
 	"github.com/joaooliveira10/serena-terminal/internal/platform"
@@ -105,12 +107,14 @@ func (s Shell) profileEnv() string {
 
 // Message keys of this package. The texts are in internal/i18n.
 const (
-	NoteBashProfile    = "plan.note.bash-profile"
-	ReasonAbsent       = "refusal.shell-absent"
-	ReasonWindowsOnly  = "refusal.shell-windows-only"
-	ReasonPolicy       = "refusal.policy"
-	ReasonRootNotASCII = "refusal.root-not-ascii"
-	AdvicePolicy       = "refusal.advice.policy"
+	NoteBashProfile     = "plan.note.bash-profile"
+	ReasonAbsent        = "refusal.shell-absent"
+	ReasonWindowsOnly   = "refusal.shell-windows-only"
+	ReasonPolicy        = "refusal.policy"
+	ReasonNoProfilePath = "refusal.no-profile-path"
+	ReasonProbeTimeout  = "refusal.probe-timeout"
+	ReasonRootNotASCII  = "refusal.root-not-ascii"
+	AdvicePolicy        = "refusal.advice.policy"
 )
 
 // PolicyCommand is what a user can run to let PowerShell load a profile.
@@ -168,9 +172,10 @@ func HookLine(host platform.Host, shell Shell, root platform.Root) (string, erro
 // Resolve works out the hook of one shell on this host: the file, the line
 // and the line ending for a new file. It returns a refusal instead when the
 // hook must not be attempted (R20): Windows PowerShell outside Windows, a
-// PowerShell that is not on PATH, an execution policy that would keep the
-// profile from loading, or a ROOT the line cannot carry. An error means the
-// question could not be answered at all (no home directory, a failed probe).
+// PowerShell that is not on PATH, one that has no profile path to give or
+// does not answer, an execution policy that would keep the profile from
+// loading, or a ROOT the line cannot carry. An error means the question could
+// not be answered at all (no home directory, a probe that failed otherwise).
 //
 // The prober is consulted for a PowerShell only when its SERENO_*_PROFILE_PATH
 // variable is not set; that is the one child process of R2.
@@ -232,7 +237,15 @@ func profilePath(host platform.Host, shell Shell, prober Prober) (string, *engin
 		return filepath.Clean(path), nil, nil
 	}
 	result, err := prober.Probe(program)
-	if err != nil {
+	switch {
+	case errors.Is(err, ErrNoProfilePath):
+		// Both refusals name the variable that answers the question in
+		// PowerShell's place: with it set, no process is started.
+		return "", &engine.Refusal{Path: string(shell), Reason: engine.NewNote(ReasonNoProfilePath, exe, shell.profileEnv())}, nil
+	case errors.Is(err, ErrProbeTimeout):
+		seconds := strconv.Itoa(int(ProbeTimeout / time.Second))
+		return "", &engine.Refusal{Path: string(shell), Reason: engine.NewNote(ReasonProbeTimeout, exe, seconds, shell.profileEnv())}, nil
+	case err != nil:
 		return "", nil, fmt.Errorf("ask %s for its profile: %w", exe, err)
 	}
 	if host.IsWindows() && result.blocks() {

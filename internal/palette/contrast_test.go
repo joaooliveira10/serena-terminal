@@ -285,3 +285,60 @@ func TestContrastDocumentIsCurrent(t *testing.T) {
 		t.Errorf("docs/contrast.md is not what `sereno check --markdown` prints now:\n%s", want)
 	}
 }
+
+// TestFloorIsNotRounded looks for colours whose ratio against white is just
+// under 4.5 and rounds to 4.50 on paper. The gate must fail them, and the
+// table must not show a bare 4.50 that reads as a pass.
+func TestFloorIsNotRounded(t *testing.T) {
+	roles := loadRoles(t)
+	found := 0
+	for value := 0x707070; value <= 0x7a7a7a && found < 3; value++ {
+		colour := Color("#" + strings.ToLower(strconvHex(value)))
+		ratio := Ratio(colour, "#ffffff")
+		if ratio >= 4.5 || ratio < 4.495 {
+			continue
+		}
+		found++
+		p := load(t)
+		data, err := json.Marshal(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var changed Palette
+		if err := json.Unmarshal(data, &changed); err != nil {
+			t.Fatal(err)
+		}
+		light := &changed.Variants[2]
+		if light.ID != "light" {
+			t.Fatalf("variant 2 is %s", light.ID)
+		}
+		light.Background, light.Foreground, light.Cursor = "#ffffff", "#000000", "#000000"
+		light.SelectionBackground, light.SelectionForeground = "#000000", "#ffffff"
+		for slot := range light.ANSI {
+			light.ANSI[slot] = "#000000"
+		}
+		light.ANSI[3] = colour
+
+		report := Check(&changed, roles)
+		if report.OK || report.Variants[2].OK {
+			t.Errorf("%s on white is %.5f, under the floor of 4.5, and passes", colour, ratio)
+		}
+		if !strings.Contains(report.Markdown(), "**4.50 (fails)**") {
+			t.Errorf("%s: the table does not mark the 4.50 that fails", colour)
+		}
+	}
+	if found == 0 {
+		t.Fatal("no colour with a ratio between 4.495 and 4.5 in the search window; widen it")
+	}
+}
+
+// strconvHex formats a 24-bit colour value as six hex digits.
+func strconvHex(value int) string {
+	const digits = "0123456789abcdef"
+	out := make([]byte, 6)
+	for i := 5; i >= 0; i-- {
+		out[i] = digits[value&0xf]
+		value >>= 4
+	}
+	return string(out)
+}

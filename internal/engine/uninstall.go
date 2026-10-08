@@ -23,8 +23,8 @@ type UninstallRequest struct {
 type remover struct {
 	root string
 	ops  []Op
-	gone map[string]bool // paths the operations so far delete
-	kept map[string]bool // paths that are known to stay
+	gone map[string]bool // paths the operations so far delete, by pathKey
+	kept map[string]bool // paths that are known to stay, by pathKey
 }
 
 // glance is how long planning waits, on Windows, for a file it does not know
@@ -35,10 +35,11 @@ const glance = 300 * time.Millisecond
 // PlanUninstall computes the operations of R39 without writing:
 //
 //  1. every recorded hook line is taken out of its profile: the exact bytes
-//     sereno inserted, or any line with the marker when those bytes are no
-//     longer there; a file sereno created is deleted when it ends up empty,
-//     with the directories created for it; the backup is deleted when the
-//     profile is back to its content from before the hook and kept otherwise;
+//     sereno inserted where they still stand as whole lines, otherwise every
+//     line that ends with the marker; a file sereno created is deleted when
+//     it ends up empty, with the directories created for it; the backup is
+//     deleted when the profile is back to its content from before the hook
+//     and kept otherwise;
 //  2. every owned file whose hash still matches is deleted; an edited one is
 //     skipped, which makes the exit code 4;
 //  3. the mode file and the manifest are deleted, then backups/, the
@@ -94,7 +95,7 @@ func PlanUninstall(req UninstallRequest) (*Plan, error) {
 	modePath := filepath.Join(req.Root, ModeName)
 	paths := make([]string, 0, len(old.Owned))
 	for path := range old.Owned {
-		if path != modePath {
+		if !samePath(path, modePath) {
 			paths = append(paths, path)
 		}
 	}
@@ -109,7 +110,7 @@ func PlanUninstall(req UninstallRequest) (*Plan, error) {
 	// manifest whatever its hash.
 	if info, err := os.Lstat(modePath); err == nil {
 		if info.IsDir() {
-			u.leave(Op{Verb: VerbSkip, Path: modePath, Note: NewNote(NoteNotRegular)})
+			u.leave(Op{Verb: VerbSkip, Path: modePath, Note: NewNote(NoteNotRegular), Incomplete: true})
 		} else {
 			u.remove(modePath, action{kind: actRemove, absent: false, sum: hashOrEmpty(modePath)}, Note{}, nil)
 		}
@@ -137,19 +138,19 @@ func hashOrEmpty(path string) string {
 
 func (u *remover) remove(path string, act action, note Note, removed []string) {
 	u.ops = append(u.ops, Op{Verb: VerbRemove, Path: path, Note: note, Removed: removed, act: act})
-	u.gone[path] = true
+	u.gone[pathKey(path)] = true
 }
 
 // leave adds an operation for a path that stays where it is.
 func (u *remover) leave(op Op) {
 	u.ops = append(u.ops, op)
-	u.kept[op.Path] = true
+	u.kept[pathKey(op.Path)] = true
 }
 
 // rmdir plans the removal of a directory that will be empty once the
 // operations planned so far are done.
 func (u *remover) rmdir(dir string) {
-	if u.gone[dir] {
+	if u.gone[pathKey(dir)] {
 		return
 	}
 	info, err := os.Lstat(dir)
@@ -157,11 +158,11 @@ func (u *remover) rmdir(dir string) {
 		return
 	}
 	if !u.willBeEmpty(dir) {
-		u.kept[dir] = true
+		u.kept[pathKey(dir)] = true
 		return
 	}
 	u.ops = append(u.ops, Op{Verb: VerbRmdir, Path: dir, act: action{kind: actRmdir}})
-	u.gone[dir] = true
+	u.gone[pathKey(dir)] = true
 }
 
 // willBeEmpty reports whether dir holds nothing but what the planned
@@ -178,10 +179,10 @@ func (u *remover) willBeEmpty(dir string) bool {
 		}
 		strangers := 0
 		for _, entry := range entries {
-			path := filepath.Join(dir, entry.Name())
+			key := pathKey(filepath.Join(dir, entry.Name()))
 			switch {
-			case u.gone[path]:
-			case u.kept[path] || entry.IsDir():
+			case u.gone[key]:
+			case u.kept[key] || entry.IsDir():
 				return false
 			default:
 				strangers++
@@ -206,7 +207,7 @@ func (u *remover) owned(path, recorded string) error {
 	case err != nil:
 		return fmt.Errorf("inspect %s: %w", path, err)
 	case !info.Mode().IsRegular():
-		u.leave(Op{Verb: VerbSkip, Path: path, Note: NewNote(NoteNotRegular)})
+		u.leave(Op{Verb: VerbSkip, Path: path, Note: NewNote(NoteNotRegular), Incomplete: true})
 		return nil
 	}
 	current, err := HashFile(path)
@@ -214,7 +215,7 @@ func (u *remover) owned(path, recorded string) error {
 		return fmt.Errorf("inspect %s: %w", path, err)
 	}
 	if current != recorded {
-		u.leave(Op{Verb: VerbSkip, Path: path, Note: NewNote(NoteEdited)})
+		u.leave(Op{Verb: VerbSkip, Path: path, Note: NewNote(NoteEdited), Incomplete: true})
 		return nil
 	}
 	u.remove(path, action{kind: actRemove, sum: current}, Note{}, nil)
@@ -235,17 +236,25 @@ func (u *remover) hook(record HookRecord) bool {
 		}
 	}
 
-	p, reason := readProfile(record.Path)
-	if !reason.IsZero() {
-		// The file became something sereno does not edit (a link, another
-		// encoding): it is left alone and reported, with the line to delete.
-		op := Op{Verb: VerbSkip, Path: record.Path, Note: reason}
-		if line := insertedText(record.Inserted); line != "" {
-			op.Removed = []string{line}
-		}
-		u.leave(op)
+	// skip leaves a profile sereno does not edit alone and reports it, with
+	// the lines the user may want to delete by hand.
+	skip := func(reason Note, lines []string) bool {
+		u.leave(Op{Verb: VerbSkip, Path: record.Path, Note: reason, Removed: lines, Incomplete: true})
 		keepBackup()
 		return false
+	}
+
+	// The size limit of apply does not hold here: taking the line out is
+	// safe however much the user has added to the file since.
+	p, reason := readProfile(record.Path, anySize)
+	if !reason.IsZero() {
+		// The file became something sereno does not edit (a link, another
+		// encoding).
+		var lines []string
+		if line := insertedText(record.Inserted); line != "" {
+			lines = []string{line}
+		}
+		return skip(reason, lines)
 	}
 	if !p.exists {
 		// Gone already. If sereno had created it, its directories may go.
@@ -258,6 +267,10 @@ func (u *remover) hook(record HookRecord) bool {
 	}
 
 	removal := removeHook(p, record.Inserted, backup, haveBackup)
+	if p.readOnly && !bytes.Equal(removal.after, p.data) {
+		// The user made the file read-only after the hook line went in.
+		return skip(NewNote(ReasonReadOnly), removal.removed)
+	}
 	current := SHA256(p.data)
 	restored := SHA256(removal.after) == record.BeforeSHA256
 	switch {

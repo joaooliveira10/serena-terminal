@@ -65,8 +65,12 @@ func guard(op, path string) error {
 // insideSandbox reports whether path lies strictly below the sandbox
 // directory. Symbolic links are resolved in the sandbox and in every existing
 // directory above path, so a link inside the sandbox cannot lead a write out
-// of it. The last element of path is not resolved: sereno replaces and removes
-// directory entries, it never writes through them.
+// of it. Resolving does not follow the other things that make a directory
+// lead elsewhere (a Windows junction above all), so every existing directory
+// between the sandbox and path is also looked at, and the check fails when
+// one of them is not a plain directory. The last element of path is not
+// resolved: sereno replaces and removes directory entries, it never writes
+// through them.
 func insideSandbox(sandbox, path string) (bool, error) {
 	if !filepath.IsAbs(sandbox) {
 		return false, errors.New("the sandbox is not an absolute path")
@@ -98,7 +102,38 @@ func insideSandbox(sandbox, path string) (bool, error) {
 	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return false, nil
 	}
+	if err := plainDirectories(root, filepath.Dir(rel)); err != nil {
+		return false, err
+	}
 	return true, nil
+}
+
+// plainDirectories walks from root down the relative path below and returns
+// an error for the first existing element that is a link or a reparse point.
+// Go reports a Windows junction, and every other reparse point that is not a
+// symbolic link, as an irregular file; filepath.EvalSymlinks leaves them in
+// the path, so without this walk a junction inside the sandbox would carry a
+// write to wherever it leads. Elements that do not exist yet end the walk:
+// nothing can lead anywhere from there.
+func plainDirectories(root, below string) error {
+	if below == "." {
+		return nil
+	}
+	dir := root
+	for _, element := range strings.Split(below, string(filepath.Separator)) {
+		dir = filepath.Join(dir, element)
+		info, err := os.Lstat(dir)
+		if isMissing(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
+			return fmt.Errorf("%s is a link or a junction", dir)
+		}
+	}
+	return nil
 }
 
 // resolveParent resolves symbolic links in the longest existing ancestor of an
@@ -257,6 +292,10 @@ func removeEmptiedDir(path string) error {
 		time.Sleep(pause)
 	}
 }
+
+// samePath reports whether two paths name the same file as far as spelling
+// can tell (see pathKey).
+func samePath(a, b string) bool { return pathKey(a) == pathKey(b) }
 
 // SHA256 returns the lower-case hexadecimal SHA-256 of data.
 func SHA256(data []byte) string {

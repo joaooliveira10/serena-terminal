@@ -228,12 +228,44 @@ func (m *Manifest) removeHook(shell string) {
 
 // addDir records a created directory once.
 func (m *Manifest) addDir(dir string) {
-	for _, existing := range m.Dirs {
-		if existing == dir {
-			return
+	m.Dirs = withPath(m.Dirs, dir)
+}
+
+// dropDir forgets a directory that was not created after all.
+func (m *Manifest) dropDir(dir string) {
+	m.Dirs = withoutPath(m.Dirs, dir)
+}
+
+// dropHookDir forgets a directory that was to be created for a shell's
+// profile.
+func (m *Manifest) dropHookDir(shell, dir string) {
+	for i := range m.Hooks {
+		if m.Hooks[i].Shell == shell {
+			m.Hooks[i].DirsCreated = withoutPath(m.Hooks[i].DirsCreated, dir)
 		}
 	}
-	m.Dirs = append(m.Dirs, dir)
+}
+
+// withPath appends path to list unless it is there already, in whatever
+// spelling (see pathKey).
+func withPath(list []string, path string) []string {
+	for _, existing := range list {
+		if samePath(existing, path) {
+			return list
+		}
+	}
+	return append(list, path)
+}
+
+// withoutPath returns list without path, in a new slice.
+func withoutPath(list []string, path string) []string {
+	out := make([]string, 0, len(list))
+	for _, existing := range list {
+		if !samePath(existing, path) {
+			out = append(out, existing)
+		}
+	}
+	return out
 }
 
 // clone returns a deep copy, so that planning never changes the manifest it

@@ -353,3 +353,58 @@ func TestSystemReader(t *testing.T) {
 	}
 	t.Logf("system signals: %+v (known: %v)", signals, known)
 }
+
+// TestFollowRuleTruthTable spells R30 out for every combination of its
+// inputs, read from the environment as a session is: Windows Terminal or not,
+// VS Code or not, the three in-band settings, and the two ways a Serena
+// profile session is recognised (the variable, the profile GUID in any letter
+// case) next to a foreign GUID and none.
+func TestFollowRuleTruthTable(t *testing.T) {
+	const guid = "{6b2d8b49-31d3-5dea-9087-93c26e1a033e}"
+	cases := 0
+	for _, wt := range []bool{false, true} {
+		for _, vscode := range []bool{false, true} {
+			for _, inband := range []Scope{ScopeProfile, ScopeAlways, ScopeOff} {
+				for _, profile := range []string{"none", "variable", "guid in upper case", "another guid"} {
+					env := map[string]string{}
+					if wt {
+						env["WT_SESSION"] = "x"
+					}
+					if vscode {
+						env["TERM_PROGRAM"] = "vscode"
+					}
+					serena := false
+					switch profile {
+					case "variable":
+						env["SERENO_SESSION"], serena = "wt-profile", true
+					case "guid in upper case":
+						env["WT_PROFILE_ID"], serena = strings.ToUpper(guid), true
+					case "another guid":
+						env["WT_PROFILE_ID"] = "{2ece5bfe-50ed-5f3a-ab87-5cd4baafed2b}"
+					}
+					session := platform.Host{OS: platform.Windows, Getenv: testenv.Getenv(env)}.Session(guid)
+					follows := wt && !vscode && inband != ScopeOff && (inband == ScopeAlways || serena)
+					route := RouteEmulator
+					switch {
+					case vscode:
+						route = RouteHost
+					case follows:
+						route = RouteInBand
+					}
+					settings := Defaults()
+					settings.InBand = inband
+					if got := settings.Follows(session); got != follows {
+						t.Errorf("wt=%v vscode=%v inband=%s profile=%s: Follows = %v, want %v", wt, vscode, inband, profile, got, follows)
+					}
+					if got := settings.Route(session); got != route {
+						t.Errorf("wt=%v vscode=%v inband=%s profile=%s: Route = %s, want %s", wt, vscode, inband, profile, got, route)
+					}
+					cases++
+				}
+			}
+		}
+	}
+	if cases != 48 {
+		t.Errorf("%d combinations walked, want 48", cases)
+	}
+}

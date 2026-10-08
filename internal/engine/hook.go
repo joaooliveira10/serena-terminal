@@ -10,7 +10,9 @@ import (
 )
 
 // HookMarker ends every hook line (R21). It is how sereno recognises a line
-// as its own when the exact bytes it recorded are no longer in the file.
+// as its own when the exact bytes it recorded are no longer in the file: a
+// line is sereno's when it ends with a space and the marker (see isHookLine).
+// A line that only mentions the marker somewhere is the user's.
 const HookMarker = "# sereno:hook"
 
 // MaxProfileSize is the largest profile sereno edits (R22): 1 MiB.
@@ -87,24 +89,54 @@ func (k textKind) markLen(data []byte) int {
 	return 0
 }
 
-// index finds sub in data at an offset that is a whole number of code units,
-// or returns -1.
-func (k textKind) index(data, sub []byte) int {
-	if len(sub) == 0 {
+// find returns the offset at which the bytes sereno recorded for an insertion
+// stand in data as whole lines, or -1. Occurrences that do not are passed
+// over: the same bytes in the middle of a line (the user commented the hook
+// out, indented it or put a command in front of it) are not sereno's
+// insertion any more, and cutting them out would damage the line around them.
+func (k textKind) find(data, recorded []byte) int {
+	if len(recorded) == 0 {
 		return -1
 	}
-	for from := 0; from <= len(data); {
-		i := bytes.Index(data[from:], sub)
+	lead, term, ok := insertionShape(k.decode(recorded))
+	if !ok {
+		return -1
+	}
+	mark, unit := k.markLen(data), k.unit()
+	for from := mark; from+len(recorded) <= len(data); {
+		i := bytes.Index(data[from:], recorded)
 		if i < 0 {
 			return -1
 		}
 		i += from
-		if i%k.unit() == 0 {
+		if (i-mark)%unit == 0 && k.wholeLines(data, i, i+len(recorded), lead, term) {
 			return i
 		}
 		from = i + 1
 	}
 	return -1
+}
+
+// wholeLines reports whether data[start:end], an occurrence of recorded bytes
+// with the given leading line ending and terminator, can be taken out without
+// touching any other line:
+//
+//   - without a leading line ending the occurrence must begin a line;
+//   - with one (sereno added it because the last line of the file had none) it
+//     must reach the end of the file, where taking it out leaves that last
+//     line as it was; once the user has written more below, the line ending
+//     in front belongs to the line above and has to stay;
+//   - without a terminator (sereno replaced an older line that ended the file
+//     without one) it must reach the end of the file as well.
+func (k textKind) wholeLines(data []byte, start, end int, lead, term string) bool {
+	atEnd := end == len(data)
+	if lead != "" {
+		return atEnd
+	}
+	if mark := k.markLen(data); start > mark && k.at(data, start-k.unit()) != '\n' {
+		return false
+	}
+	return term != "" || atEnd
 }
 
 // line is one line of a profile: its text is data[start:end] and the line
@@ -140,12 +172,23 @@ type profile struct {
 	data   []byte
 	perm   fs.FileMode
 	kind   textKind
+	// readOnly is true when the owner may not write the file: the mode has
+	// no owner write bit, which is also how Go reports the read-only
+	// attribute of Windows. sereno reads such a file and never changes it.
+	readOnly bool
 }
+
+// anySize is the limit for readProfile that accepts a profile of any size.
+const anySize = -1
 
 // readProfile inspects a hook target without changing it. A non-empty Note is
 // the reason the file must not be edited (R22): the caller turns it into a
 // refusal that shows the line, so the user can add it by hand.
-func readProfile(path string) (profile, Note) {
+//
+// limit is the largest size accepted. Apply passes MaxProfileSize. Uninstall
+// passes anySize: taking sereno's own line out is safe however much the user
+// has added since.
+func readProfile(path string, limit int64) (profile, Note) {
 	info, err := os.Lstat(path)
 	if isMissing(err) {
 		return profile{}, Note{}
@@ -158,21 +201,22 @@ func readProfile(path string) (profile, Note) {
 		return profile{}, NewNote(ReasonSymlink)
 	case !mode.IsRegular():
 		return profile{}, NewNote(ReasonNotRegular)
-	case info.Size() > MaxProfileSize:
+	case limit >= 0 && info.Size() > limit:
 		return profile{}, NewNote(ReasonTooLarge)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return profile{}, NewNote(ReasonUnreadable, cause(err))
 	}
-	if len(data) > MaxProfileSize {
+	if limit >= 0 && int64(len(data)) > limit {
 		return profile{}, NewNote(ReasonTooLarge)
 	}
 	kind, reason := classify(data)
 	if reason != "" {
 		return profile{}, NewNote(reason)
 	}
-	return profile{exists: true, data: data, perm: info.Mode().Perm(), kind: kind}, Note{}
+	perm := info.Mode().Perm()
+	return profile{exists: true, data: data, perm: perm, kind: kind, readOnly: perm&0o200 == 0}, Note{}
 }
 
 // classify decides how the text of a profile is stored, or returns the key of
@@ -218,6 +262,7 @@ type hookEdit struct {
 	action   hookAction
 	after    []byte // the new content of the file (not set for hookKeep)
 	inserted []byte // the bytes the manifest must record from now on
+	replaced string // for hookReplace: the line that makes way, for the plan
 }
 
 // editHook computes the edit that puts the hook line text into a profile
@@ -234,26 +279,29 @@ func editHook(p profile, recorded []byte, text string, newFileCRLF bool) hookEdi
 	}
 	k, data := p.kind, p.data
 
-	// 1. The bytes sereno recorded are still there: they are replaced as a
-	// whole, so the line ending sereno added in front of them (when the file
-	// did not end with one) stays accounted for.
-	if i := k.index(data, recorded); i >= 0 {
-		if lead, term, ok := insertionShape(k.decode(recorded)); ok {
-			want := k.encode(lead + text + term)
-			if bytes.Equal(want, recorded) {
-				return hookEdit{action: hookKeep, inserted: recorded}
-			}
-			return hookEdit{action: hookReplace, after: splice(data, i, i+len(recorded), want), inserted: want}
+	// 1. The bytes sereno recorded are still there as whole lines: they are
+	// replaced as a whole, so the line ending sereno added in front of them
+	// (when the file did not end with one) stays accounted for.
+	if i := k.find(data, recorded); i >= 0 {
+		lead, term, _ := insertionShape(k.decode(recorded))
+		want := k.encode(lead + text + term)
+		if bytes.Equal(want, recorded) {
+			return hookEdit{action: hookKeep, inserted: recorded}
+		}
+		return hookEdit{
+			action: hookReplace, after: splice(data, i, i+len(recorded), want), inserted: want,
+			replaced: strings.Trim(k.decode(recorded), "\r\n"),
 		}
 	}
 
-	// 2. A line with the marker exists: identical means nothing to do,
-	// otherwise the first one is replaced in place, keeping its terminator.
+	// 2. A line that ends with the marker exists: identical means nothing to
+	// do, otherwise the first one is replaced in place, keeping its
+	// terminator.
 	lines := k.lines(data)
 	first := -1
 	for n, l := range lines {
 		current := k.decode(data[l.start:l.end])
-		if !strings.Contains(current, HookMarker) {
+		if !isHookLine(current) {
 			continue
 		}
 		if current == text {
@@ -266,7 +314,10 @@ func editHook(p profile, recorded []byte, text string, newFileCRLF bool) hookEdi
 	if first >= 0 {
 		l := lines[first]
 		want := append(k.encode(text), data[l.end:l.next]...)
-		return hookEdit{action: hookReplace, after: splice(data, l.start, l.next, want), inserted: want}
+		return hookEdit{
+			action: hookReplace, after: splice(data, l.start, l.next, want), inserted: want,
+			replaced: k.decode(data[l.start:l.end]),
+		}
 	}
 
 	// 3. Append at the end: a line ending first when the text does not end
@@ -306,9 +357,13 @@ func insertionShape(recorded string) (lead, term string, ok bool) {
 	return lead, term, isHookLine(body)
 }
 
-// isHookLine reports whether text is exactly one line that carries the marker.
+// isHookLine reports whether text is one line that is sereno's: it ends with
+// a space and the marker (R21), spaces and tabs after the marker aside. What
+// stands in front does not matter, so a hook line the user commented out or
+// indented is still recognised; a line that merely mentions the marker, in a
+// string or in the middle of a comment, is not.
 func isHookLine(text string) bool {
-	return strings.Contains(text, HookMarker) && !strings.ContainsAny(text, "\r\n")
+	return !strings.ContainsAny(text, "\r\n") && strings.HasSuffix(strings.TrimRight(text, " \t"), " "+HookMarker)
 }
 
 // insertedText returns the line inside the bytes sereno recorded for an
@@ -339,18 +394,19 @@ type hookRemoval struct {
 }
 
 // removeHook computes the content of a profile without its hook line (R39).
-// If the bytes sereno recorded occur in the file, exactly those are removed;
-// otherwise every line containing the marker is. When a backup is available
-// and the file differs from it only where sereno's bytes stand in place of an
-// older hook line, the backup's content is the result, so a line that an
-// earlier installation owned comes back byte for byte.
+// If the bytes sereno recorded stand in the file as whole lines, exactly
+// those are removed; otherwise every line ending with the marker is, as a
+// whole line. When a backup is available and the file differs from it only
+// where sereno's bytes stand in place of an older hook line, the backup's
+// content is the result, so a line that an earlier installation owned comes
+// back byte for byte.
 func removeHook(p profile, recorded []byte, backup []byte, haveBackup bool) hookRemoval {
 	k, data := p.kind, p.data
 	if len(recorded) == 0 {
 		// The line was there before sereno: it is not sereno's to remove.
 		return hookRemoval{after: data}
 	}
-	if i := k.index(data, recorded); i >= 0 {
+	if i := k.find(data, recorded); i >= 0 {
 		prefix, suffix := data[:i], data[i+len(recorded):]
 		result := hookRemoval{
 			after:   splice(data, i, i+len(recorded), nil),
@@ -368,7 +424,7 @@ func removeHook(p profile, recorded []byte, backup []byte, haveBackup bool) hook
 	result := hookRemoval{}
 	kept := 0
 	for _, l := range k.lines(data) {
-		if current := k.decode(data[l.start:l.end]); strings.Contains(current, HookMarker) {
+		if current := k.decode(data[l.start:l.end]); isHookLine(current) {
 			result.after = append(result.after, data[kept:l.start]...)
 			result.removed = append(result.removed, current)
 			kept = l.next
