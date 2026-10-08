@@ -243,7 +243,7 @@ type startRule struct {
 // the Windows runner of CI.
 const (
 	profileTest      = "test/shell/profile.ps1"
-	profileTestStart = `            $arguments = '-NoLogo -NoExit -ExecutionPolicy RemoteSigned -File "' + $initCopy + '"'`
+	profileTestStart = `        $arguments = '-NoLogo -NoExit -ExecutionPolicy RemoteSigned -File "' + $initCopy + '"'`
 )
 
 // TestScriptsStartShellsWithoutProfiles is the safety rule of the shell tests
@@ -360,15 +360,29 @@ func TestTheProfileTestRunsOnTheHostedRunnerOnly(t *testing.T) {
 	if strings.Count(text, profileTestStart+"\n") != 1 {
 		t.Errorf("%s must start the command line of the Serena profile exactly once, as the fragment has it", profileTest)
 	}
-	// What was at the place of the profile is put back, and what was not is
-	// removed, also when the session fails.
-	for _, piece := range []string{
-		"if ([IO.File]::Exists($profileFile)) { $previous = [IO.File]::ReadAllBytes($profileFile) }\n",
-		"        } finally {\n            if ($null -ne $previous) { [IO.File]::WriteAllBytes($profileFile, $previous) }\n            elseif ([IO.File]::Exists($profileFile)) { [IO.File]::Delete($profileFile) }\n",
-	} {
-		if !strings.Contains(text, piece) {
-			t.Errorf("%s no longer has:\n%s", profileTest, piece)
+	// No profile of a real user is written or loaded, on a runner either:
+	// the profile is written, and the session started, only once the file
+	// PowerShell named has been found inside the temporary home, and that is
+	// a check of its own.
+	inOrder := []string{
+		guard,
+		"    $inside = $false\n",
+		"        $inside = [IO.File]::Exists((Join-Path (Split-Path -Parent (Split-Path -Parent $profileFile)) $sentinel))\n",
+		"        Check $inside 'that profile is a file inside the temporary home, because the Documents folder follows USERPROFILE: nothing outside that home is written' $profileFile\n",
+		"    if ($inside) {\n",
+		"        [IO.File]::WriteAllText($profileFile, $profileText)\n",
+		profileTestStart + "\n        $child = Start-Child $arguments\n",
+	}
+	from := 0
+	for _, piece := range inOrder {
+		next := strings.Index(text[from:], piece)
+		if next < 0 {
+			t.Fatalf("%s no longer has, in this order, the steps that keep it inside its temporary home; missing or out of place:\n%s", profileTest, piece)
 		}
+		from += next + len(piece)
+	}
+	if strings.Count(text, "$inside = ") != 2 || strings.Count(text, "$profileFile,") != 1 || strings.Count(text, "Start-Child $arguments") != 2 {
+		t.Errorf("%s must decide once whether the profile is inside its temporary home, write that one file once, and start two processes: the question and the session", profileTest)
 	}
 
 	// Nothing else in the repository asks for it.

@@ -16,14 +16,16 @@
 #
 # How it works. The session gets a temporary folder as its home, like every
 # session of run.ps1. The PowerShell under test is asked, with -NoProfile,
-# where its profile is in that environment, and a profile is written there:
-# a marker variable, and a prompt of its own that notes what it finds when it
-# is called. Windows PowerShell 5.1 looks for its Documents folder below
-# USERPROFILE, so its profile is then a file inside the temporary folder.
-# Where a PowerShell answers with a file outside it, that is the file of the
-# runner's own user: what was there is put back at the end, and what was not
-# there is removed. Then the session is started as the fragment of R18 starts
-# it, with its input closed: the host shows one prompt and ends.
+# where its profile is in that environment. Windows PowerShell 5.1 and
+# PowerShell 7 look for the Documents folder below USERPROFILE, so the answer
+# is a file inside the temporary home (seen for both on the runner of CI, and
+# for 5.1 on the maintainer's machine). The test insists on it: a PowerShell
+# that named a file anywhere else fails the test before a profile is written
+# or a session started, so no profile of a real user is ever written or
+# loaded, on a runner either. The profile written there holds a marker
+# variable and a prompt of its own that notes what it finds when it is
+# called. Then the session is started as the fragment of R18 starts it, with
+# its input closed: the host shows one prompt and ends.
 #
 # It prints one line per check ("ok - ..." or "not ok - ...") and ends with
 # exit code 1 when a check failed.
@@ -170,39 +172,29 @@ try {
     $profileFile = $asked.Out.Trim()
     Check (($asked.Code -eq 0) -and ($profileFile -cmatch '\A[A-Za-z]:\\[^\r\n]+\.ps1\z')) 'this PowerShell says where the profile of the user is' ("exit code $($asked.Code): " + (Show $asked.Out) + ' ' + $asked.Err.Trim())
 
+    # That file must lie below the Documents folder of the temporary home:
+    # this test writes nothing outside its temporary folder, on a runner
+    # either, and starts no session that would load a profile from elsewhere.
+    # A file put into that Documents folder tells whether the two are the same
+    # folder, whatever name it goes by.
+    $inside = $false
     if ($script:failed -eq 0) {
-        # Is that file below the Documents folder of the temporary home? A file
-        # put into that folder tells, whatever name the folder goes by.
         $sentinel = 'sereno-' + [guid]::NewGuid().ToString('N')
         [IO.File]::WriteAllText((Join-Path $documents $sentinel), '')
         $inside = [IO.File]::Exists((Join-Path (Split-Path -Parent (Split-Path -Parent $profileFile)) $sentinel))
         [IO.File]::Delete((Join-Path $documents $sentinel))
-        if ($inside) { [Console]::Out.WriteLine('# its profile is a file inside the temporary home: the Documents folder follows USERPROFILE') }
-        else { [Console]::Out.WriteLine("# its profile is a file of the runner's own user: $profileFile") }
+        Check $inside 'that profile is a file inside the temporary home, because the Documents folder follows USERPROFILE: nothing outside that home is written' $profileFile
+    }
 
-        # The profile, in the place PowerShell named. What this test creates
-        # there it takes away again; what was there it puts back.
-        $previous = $null
-        if ([IO.File]::Exists($profileFile)) { $previous = [IO.File]::ReadAllBytes($profileFile) }
-        $missing = @()
-        $dir = Split-Path -Parent $profileFile
-        while ($dir -and (-not [IO.Directory]::Exists($dir))) { $missing = @($dir) + $missing; $dir = Split-Path -Parent $dir }
-        try {
-            foreach ($dir in $missing) { $null = [IO.Directory]::CreateDirectory($dir) }
-            [IO.File]::WriteAllText($profileFile, $profileText)
+    if ($inside) {
+        $null = [IO.Directory]::CreateDirectory((Split-Path -Parent $profileFile))
+        [IO.File]::WriteAllText($profileFile, $profileText)
 
-            # The command line of the Serena profile, as the fragment has it
-            # (R18). It is the one start of a shell in this repository that
-            # does not say -NoProfile.
-            $arguments = '-NoLogo -NoExit -ExecutionPolicy RemoteSigned -File "' + $initCopy + '"'
-            $child = Start-Child $arguments
-        } finally {
-            if ($null -ne $previous) { [IO.File]::WriteAllBytes($profileFile, $previous) }
-            elseif ([IO.File]::Exists($profileFile)) { [IO.File]::Delete($profileFile) }
-            for ($i = $missing.Count - 1; $i -ge 0; $i--) {
-                if ([IO.Directory]::Exists($missing[$i]) -and (@([IO.Directory]::GetFileSystemEntries($missing[$i])).Count -eq 0)) { [IO.Directory]::Delete($missing[$i]) }
-            }
-        }
+        # The command line of the Serena profile, as the fragment has it
+        # (R18). It is the one start of a shell in this repository that does
+        # not say -NoProfile.
+        $arguments = '-NoLogo -NoExit -ExecutionPolicy RemoteSigned -File "' + $initCopy + '"'
+        $child = Start-Child $arguments
 
         $found = ''
         if ([IO.File]::Exists($report)) { $found = (@([IO.File]::ReadAllLines($report)) -join '|') }
@@ -212,16 +204,15 @@ try {
         Check ($found.Contains('|kept=True|')) 'init.ps1 found the prompt of the profile and kept it: the profile ran first' $found
         Check ($found.EndsWith('|wrapped=True')) 'the prompt of the session is another function by then: the wrapper of R30, which called the one of the profile' $found
         $palette = [IO.File]::ReadAllText((Join-Path $Golden 'palette/light.bin'))
-        Check ($child.Out.Contains($palette + 'mine> ')) 'the session paints the variant of the system, then shows the prompt of the user unchanged' (Show $child.Out.Substring(0, [Math]::Min(120, $child.Out.Length)))
-        if ($child.Out -cne ($palette + 'mine> ')) { [Console]::Out.WriteLine('# besides that the session wrote: ' + (Show $child.Out.Replace($palette + 'mine> ', '<PALETTE and the prompt>'))) }
+        Check ($child.Out -ceq ($palette + 'mine> ')) 'the session paints the variant of the system, then shows the prompt of the user unchanged, and writes nothing else' (Show $child.Out.Replace($palette, '<PALETTE of light>'))
         Check ($child.Code -eq 0 -and $child.Err.Trim() -eq '') 'the session ends without an error when its input ends' ("exit code $($child.Code): " + $child.Err.Trim())
-        Check ((-not [IO.File]::Exists($profileFile)) -or ($null -ne $previous)) 'the profile this test wrote is gone again'
     }
 } finally {
     for ($i = 0; $i -lt 20; $i++) {
         try { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction Stop; break } catch { Start-Sleep -Milliseconds 100 }
     }
 }
+Check (-not (Test-Path -LiteralPath $tmp)) 'the temporary home is gone again, and the profile with it'
 
 [Console]::Out.WriteLine("profile.ps1: $($script:passed) passed, $($script:failed) failed, 0 skipped ($shell)")
 if ($script:failed -gt 0) { exit 1 }
