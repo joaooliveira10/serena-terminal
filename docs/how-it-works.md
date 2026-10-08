@@ -117,20 +117,20 @@ If the settings no longer allow sending (someone ran `sereno theme --inband off`
 
 Nothing here starts a program. The tests prove it by running the session files and their prompts with `PATH` emptied. There is no background process either, so nothing changes while the shell sits idle: the change shows at the next prompt. A file that another program holds open at that moment (the settings file, or a file of a Git repository) is read at the following prompt instead; the prompt does not fail.
 
-What it costs, from three runs of `scripts/bench.ps1`:
+What it costs, from nine runs of `scripts/bench.ps1` on 2026-10-08 (three of them went on to bash):
 
 | | Measured | Budget on the maintainer's machine | Gate in CI |
 | :--- | :--- | :--- | :--- |
-| Loading `init.ps1`, session started from the Serena profile | 67 to 71 ms | 80 ms | 150 ms |
-| Loading `init.ps1`, session with a hook line | 56 to 59 ms | 65 ms | 150 ms |
-| One prompt with the check active | 0.8 to 0.9 ms | 2 ms | 10 ms |
-| The first prompt of a session, once (not judged) | 57 to 58 ms from the Serena profile, 33 ms with a hook line | | |
+| Loading `init.ps1`, session started from the Serena profile | 71 to 73 ms in eight runs, 81 ms in one | 80 ms | 150 ms |
+| Loading `init.ps1`, session with a hook line | 59 to 63 ms | 65 ms | 150 ms |
+| One prompt with the check active | 0.6 to 0.7 ms | 2 ms | 10 ms |
+| The first prompt of a session, once (not judged) | 58 to 63 ms from the Serena profile, 32 to 34 ms with a hook line | | |
 | Loading `init.bash` | 3 ms | 60 ms | 60 ms |
 | The bash hook before one prompt, check active | 1.9 to 2.0 ms | 10 ms | 10 ms |
 
-Loading is measured inside the process, around the line that loads the file, as the median of nine fresh processes that have no start-up cache of an earlier PowerShell to replay; that is the slowest case. The prompt figure is the mean of 200 calls. A new Serena tab therefore waits about 125 to 130 ms for sereno before its first prompt, on top of the time PowerShell itself needs to start.
+Loading is measured inside the process, around the line that loads the file, as the median of nine fresh processes that have no start-up cache of an earlier PowerShell to replay; that is the slowest case. The prompt figure is the mean of 200 calls. The budgets are for an idle machine. In the one run over its budget other work was running: the file as it was before its last change, measured right after it, took 78 ms where it otherwise took 71 to 74 ms. A new Serena tab therefore waits about 130 to 135 ms for sereno before its first prompt, on top of the time PowerShell itself needs to start.
 
-PowerShell 7 and zsh were measured in the same way on the runners of CI, in three runs on 2026-10-08. Those are hosted machines, with two processors on Windows and Linux, and one of them can be half as slow again as the next. Loading `init.ps1` under PowerShell 7.6 on Windows: 120 to 172 ms from the Serena profile and 107 to 151 ms with a hook line, where Windows PowerShell 5.1 took 86 to 129 ms and 69 to 99 ms on the same three runners. On Linux: 86 to 126 ms and 76 to 113 ms. On macOS: 62 to 67 ms and 57 to 72 ms. About 30 ms of that (16 ms on macOS) is the look through `$PSStyle`, measured in the first of the three runs. One prompt with the check active: 0.4 to 1.1 ms. Loading `init.zsh`: 1 ms; its hook before one prompt: 0.3 to 0.5 ms. The gates in CI are the same for PowerShell 7 as for 5.1, with one exception: on Windows PowerShell 7 has 210 ms for loading `init.ps1`, because it takes 1.3 to 1.6 times as long as 5.1 for the same file on the same runner. zsh has the gates of bash.
+PowerShell 7 and zsh were measured in the same way on the runners of CI, in four runs on 2026-10-08. Those are hosted machines, with two processors on Windows and Linux, and one of them can be half as slow again as the next: each run draws another one, so the figures that follow are what those four runs measured and not limits, and a later run can fall outside them. Loading `init.ps1` under PowerShell 7.6 on Windows: 120 to 175 ms from the Serena profile and 107 to 151 ms with a hook line, where Windows PowerShell 5.1 took 86 to 129 ms and 69 to 99 ms on the same four runners. On Linux: 86 to 127 ms and 76 to 115 ms. On macOS: 62 to 69 ms and 57 to 72 ms. About 30 ms of that (16 ms on macOS) is the look through `$PSStyle`, measured in the first of the four runs. One prompt with the check active: 0.3 to 1.2 ms. Loading `init.zsh`: 1 ms; its hook before one prompt: 0.3 to 0.6 ms. What moved far less than the milliseconds is the cost of `init.ps1` against the start of PowerShell without it on the same runner: 0.24 to 0.35 of it on Windows and Linux, 0.11 to 0.16 on macOS. The gates in CI are the same for PowerShell 7 as for 5.1, with one exception: on Windows PowerShell 7 has 210 ms for loading `init.ps1`, because it takes 1.3 to 1.6 times as long as 5.1 for the same file on the same runner. zsh has the gates of bash. The gates are fixed figures and close to what the slowest of these runners delivered (83 to 89 per cent of them), so a benchmark step that fails in CI is run again before it is read as a regression.
 
 ## The prompt and the line editor
 

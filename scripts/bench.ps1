@@ -37,7 +37,10 @@
 #
 # The local budgets are judged on an idle machine: with other work running, a
 # median over 80 ms says nothing about init.ps1. Run this script again alone
-# before reading a failure as a regression.
+# before reading a failure as a regression. The gates of CI are judged on
+# whatever hosted machine a run draws, and those differ by half: there, look
+# at what init.ps1 costs against the start of PowerShell on the same machine,
+# which this script prints and does not judge, and run the job again.
 #
 # Everything is rendered into, and run from, a temporary folder that is
 # removed at the end. The children get that folder as their home; PSReadLine
@@ -315,6 +318,12 @@ $c = [Globalization.CultureInfo]::InvariantCulture
 if ($failed) {
     Write-Output 'sereno bench: a budget was not met, or a measurement could not be made'
     if (-not $loose) { Write-Output 'sereno bench: the local budgets are for an idle machine; run this again with nothing else running before reading it as a regression' }
+    # The gates of CI are fixed figures, and the hosted machines are not one
+    # machine: in the runs of 2026-10-08 the slowest took half as long again
+    # as the fastest for the same file (R42 and its amendments have the
+    # figures). What init.ps1 costs against the start of PowerShell on the
+    # same machine moved far less.
+    else { Write-Output 'sereno bench: the gates of CI are fixed figures, and one hosted machine can be half as slow again as the next; before reading this as a regression, compare the lines "init.ps1 against the start of PowerShell without it" with those of an earlier run, and run the job again' }
     exit 1
 }
 Write-Output 'sereno bench: all budgets met'

@@ -283,12 +283,16 @@ $library = {
     function Go([string]$relative) { Set-Location -LiteralPath (Join-Path $T.Home $relative) }
     # R25: styles, each without its escape character, and what they are after
     # init.ps1: a background parameter (40-47, 100-107) is the foreground of
-    # the same slot; the numbers after 38 and 48 are colour arguments.
+    # the same slot; the numbers after 38 and 48 are colour arguments. The
+    # last line holds the two ends of each range, each alone in a style or
+    # last in it, and their neighbours outside: 39 and 49 are the default
+    # colours, which R25 does not name, and 108 is no colour at all.
     function Samples {
         [ordered]@{
             '[44;1m' = '[34;1m'; '[1;103m' = '[1;93m'; '[30;47m' = '[30;37m'; '[100m' = '[90m'; '[32;1m' = '[32;1m'; '[0m' = '[0m'; '[m' = '[m'
             '[38;5;44m' = '[38;5;44m'; '[38;2;40;41;42m' = '[38;2;40;41;42m'; '[48;5;44;41m' = '[48;5;44;31m'; '[38;5;1;44m' = '[38;5;1;34m'
             '[01;044m' = '[01;34m'; '[0100;1m' = '[90;1m'; '[1;4m' = '[1;4m'; '[104m' = '[94m'
+            '[40m' = '[30m'; '[1;107m' = '[1;97m'; '[47m' = '[37m'; '[7;100m' = '[7;90m'; '[39;49m' = '[39;49m'; '[1;108m' = '[1;108m'
         }
     }
 }
@@ -349,6 +353,8 @@ $profileSession = @{ WT_SESSION = 'test-session'; SERENO_SESSION = 'wt-profile';
 try {
     # -----------------------------------------------------------------------
     Invoke-Session 'Serena profile session in Windows Terminal' $profileSession $defaultMode {
+        # The line editor these sessions have: the documents name its version.
+        [Console]::Out.WriteLine('# PSReadLine ' + (Get-Module PSReadLine).Version + ' under PowerShell ' + $PSVersionTable.PSVersion)
         $stock = '"PS $($executionContext.SessionState.Path.CurrentLocation)$(''>'' * ($nestedPromptLevel + 1)) ";'
         $definition = (@($function:prompt.ToString() -split "`r?`n" | Where-Object { -not $_.TrimStart().StartsWith('#') }) -join "`n").Trim()
         CheckEqual $definition $stock 'the stock prompt of this PowerShell is the one R26 expects'
@@ -881,7 +887,22 @@ try {
             $PSStyle.FileInfo.Executable = $E + '[01;044m'
             $PSStyle.FileInfo.Extension['.odd'] = $E + '[41;97m'
             $zip = $PSStyle.FileInfo.Extension['.zip']
+            # Every sample of R25 as one more entry of FileInfo.Extension:
+            # the walk through the real $PSStyle hands a style on to be
+            # rewritten only when it looks like it holds a background, and
+            # none that does may be passed over, the ends of the two ranges
+            # included. PowerShell takes a style only when each sequence in
+            # it has a number, which leaves out the one sample that has none.
+            $samples = Samples
+            $entries = [ordered]@{}
+            $number = 0
+            foreach ($sample in $samples.Keys) {
+                if ($sample -cmatch '\A\[[0-9]+(?:;[0-9]+)*m\z') { $PSStyle.FileInfo.Extension[".sample$number"] = $E + $sample; $entries[".sample$number"] = $E + $samples[$sample] }
+                $number++
+            }
             . $T.Init
+            $wrong = @(foreach ($entry in $entries.Keys) { $got = $PSStyle.FileInfo.Extension[$entry]; if ($got -cne $entries[$entry]) { "$entry -> " + (Show $got) } })
+            Check ($entries.Count -ge 20 -and $wrong.Count -eq 0) 'as entries of $PSStyle.FileInfo.Extension the samples of R25 come out as the rule says' ("$($entries.Count) entries; " + ($wrong -join ', '))
             CheckEqual $PSStyle.Progress.Style ($E + '[1;93m') 'Progress.Style loses its background'
             CheckEqual $PSStyle.Formatting.TableHeader ($E + '[92;30m') 'a value of Formatting loses its background'
             CheckEqual $PSStyle.Formatting.Warning ($E + '[38;5;44m') 'a colour argument that only looks like a background is left alone'

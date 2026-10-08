@@ -5,7 +5,9 @@
 #             the wrapper of the system (scripts/test.ps1 or scripts/test.sh),
 #             which runs the smoke run of the built program, the behaviour
 #             tests of the init files under every shell that is installed, the
-#             tests of the install scripts and the budgets with the CI gates
+#             tests of the install scripts and the budgets with the CI gates;
+#             on Windows also the one test in which a profile of the user
+#             takes part (test/shell/profile.ps1, the last sentence of T7)
 #   checks    gofmt, go vet for the three systems, the dependency rule of R1,
 #             the six builds without cgo, the race detector
 #   floor     build and tests with Go 1.24, the version go.mod declares
@@ -103,6 +105,22 @@ jobs:
         if: ${{ !cancelled() && runner.os == 'Windows' }}
         shell: cmd
         run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts\bench.ps1 -SkipBash
+
+      # The last sentence of T7, and the one test that lets a profile take
+      # part: the command line of the Serena profile keeps the profile of the
+      # user loaded, and init.ps1 runs after it. The script asks for a hosted
+      # runner and refuses anywhere else; these two steps are the only ones
+      # that ask for it. They are the last steps on Windows, so that nothing
+      # of it can reach another step.
+      - name: A profile of the user runs before init.ps1, under Windows PowerShell 5.1
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        shell: cmd
+        run: powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File test\shell\profile.ps1 -RunnerProfile
+
+      - name: A profile of the user runs before init.ps1, under PowerShell 7
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        shell: cmd
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File test\shell\profile.ps1 -RunnerProfile
 
       # The smoke run of the built program, run.bash, run.zsh, run.ps1 under
       # PowerShell 7, the install scripts, and the budgets of all three.

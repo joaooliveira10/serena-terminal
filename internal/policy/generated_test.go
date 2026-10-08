@@ -236,11 +236,22 @@ type startRule struct {
 	atLeast int
 }
 
+// The one start of a shell that lets a profile take part (T7, its last
+// sentence): test/shell/profile.ps1 starts the command line of the Serena
+// profile as the fragment of R18 has it, to show that the profile of the user
+// runs first. TestTheProfileTestRunsOnTheHostedRunnerOnly keeps that file to
+// the Windows runner of CI.
+const (
+	profileTest      = "test/shell/profile.ps1"
+	profileTestStart = `            $arguments = '-NoLogo -NoExit -ExecutionPolicy RemoteSigned -File "' + $initCopy + '"'`
+)
+
 // TestScriptsStartShellsWithoutProfiles is the safety rule of the shell tests
 // made structural: wherever a script of the repository starts PowerShell, it
 // says -NoProfile; wherever it starts bash, --noprofile --norc; zsh, -f. A
 // test that loaded the developer's real profile would be testing the wrong
-// thing and could change the wrong files.
+// thing and could change the wrong files. The one exception is a line of the
+// file named above, and it is counted.
 func TestScriptsStartShellsWithoutProfiles(t *testing.T) {
 	rules := []startRule{
 		{"PowerShell through an argument string", regexp.MustCompile(`(?i)arguments\s*=\s*'-|arguments=\(-`), "-NoProfile", 6},
@@ -252,6 +263,7 @@ func TestScriptsStartShellsWithoutProfiles(t *testing.T) {
 	seen := make([]int, len(rules))
 	root := testenv.RepoRoot(t)
 	scripts := 0
+	exceptions := 0
 	for _, dir := range []string{"scripts", "test/shell", "test/install"} {
 		err := filepath.WalkDir(filepath.Join(root, filepath.FromSlash(dir)), func(path string, entry fs.DirEntry, err error) error {
 			if err != nil || entry.IsDir() {
@@ -266,6 +278,10 @@ func TestScriptsStartShellsWithoutProfiles(t *testing.T) {
 			text := string(data)
 			for number, line := range strings.Split(text, "\n") {
 				if strings.HasPrefix(strings.TrimSpace(line), "#") {
+					continue
+				}
+				if filepath.ToSlash(rel) == profileTest && strings.TrimRight(line, "\r") == profileTestStart {
+					exceptions++
 					continue
 				}
 				for i, rule := range rules {
@@ -298,6 +314,111 @@ func TestScriptsStartShellsWithoutProfiles(t *testing.T) {
 	for i, rule := range rules {
 		if seen[i] < rule.atLeast {
 			t.Errorf("%s is started on %d lines, want at least %d: the pattern of this test no longer matches the scripts", rule.what, seen[i], rule.atLeast)
+		}
+	}
+	if exceptions != 1 {
+		t.Errorf("%s starts a shell without -NoProfile on %d lines, want the one line that starts the command line of the Serena profile", profileTest, exceptions)
+	}
+}
+
+// TestTheProfileTestRunsOnTheHostedRunnerOnly keeps the exception above
+// where test plan T7 puts it. test/shell/profile.ps1 is the one script that
+// lets a profile take part, and may write the profile file of the user it
+// runs as. It must refuse before it creates, writes or starts anything unless
+// it was asked with -RunnerProfile on a Windows runner hosted by GitHub; no
+// other script of the repository asks for it; and the CI workflow does, once
+// for each PowerShell, in steps that run on Windows only.
+func TestTheProfileTestRunsOnTheHostedRunnerOnly(t *testing.T) {
+	text := repositoryText(t, profileTest)
+	// Without the switch it is a skipped test. With the switch and in the
+	// wrong place it is a refusal, so that a step of the workflow that asks
+	// for it can never pass without having run it.
+	const guard = "$hosted = ($env:OS -ceq 'Windows_NT') -and ($env:GITHUB_ACTIONS -ceq 'true') -and ($env:RUNNER_ENVIRONMENT -ceq 'github-hosted')\n" +
+		"if (-not ($RunnerProfile -and $hosted)) {\n" +
+		"    [Console]::Out.WriteLine('skip - a profile of the user runs before init.ps1: this test lets a profile take part, so it runs on the Windows runner of CI only (T7)')\n" +
+		"    [Console]::Out.WriteLine(\"profile.ps1: 0 passed, 0 failed, 1 skipped ($shell)\")\n" +
+		"    # Asked for and refused is not a pass: the step of the workflow must fail\n" +
+		"    # if it ever lands where this test does not run.\n" +
+		"    if ($RunnerProfile) { [Console]::Error.WriteLine('profile.ps1: -RunnerProfile was given, but this is not a Windows runner hosted by GitHub; nothing was started'); exit 3 }\n" +
+		"    exit 0\n" +
+		"}\n"
+	at := strings.Index(text, guard)
+	if at < 0 || strings.Count(text, "$hosted") != 2 {
+		t.Fatalf("%s does not refuse, in the words this test knows, to run anywhere but on a hosted Windows runner", profileTest)
+	}
+	// Above the refusal nothing is created, written, deleted or started, and
+	// the answer is not prepared anywhere else.
+	before := regexp.MustCompile(`(?m)^[ \t]*#.*\n`).ReplaceAllString(text[:at], "")
+	for _, action := range []string{"New-Item", "Copy-Item", "Remove-Item", "Set-Content", "Out-File", "WriteAll", "CreateDirectory", "Delete(", "Start(", "Start-", "Invoke-", "& ", "$hosted", "$RunnerProfile ="} {
+		if strings.Contains(before, action) {
+			t.Errorf("%s has %q before it has looked where it runs", profileTest, action)
+		}
+	}
+	if !strings.Contains(before, "[switch]$RunnerProfile\n") {
+		t.Errorf("%s must take -RunnerProfile as a switch, off unless it is given", profileTest)
+	}
+	if strings.Count(text, profileTestStart+"\n") != 1 {
+		t.Errorf("%s must start the command line of the Serena profile exactly once, as the fragment has it", profileTest)
+	}
+	// What was at the place of the profile is put back, and what was not is
+	// removed, also when the session fails.
+	for _, piece := range []string{
+		"if ([IO.File]::Exists($profileFile)) { $previous = [IO.File]::ReadAllBytes($profileFile) }\n",
+		"        } finally {\n            if ($null -ne $previous) { [IO.File]::WriteAllBytes($profileFile, $previous) }\n            elseif ([IO.File]::Exists($profileFile)) { [IO.File]::Delete($profileFile) }\n",
+	} {
+		if !strings.Contains(text, piece) {
+			t.Errorf("%s no longer has:\n%s", profileTest, piece)
+		}
+	}
+
+	// Nothing else in the repository asks for it.
+	root := testenv.RepoRoot(t)
+	for _, dir := range []string{"scripts", "test"} {
+		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, entry fs.DirEntry, err error) error {
+			if err != nil || entry.IsDir() {
+				return err
+			}
+			rel, _ := filepath.Rel(root, path)
+			if filepath.ToSlash(rel) == profileTest {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			if strings.Contains(string(data), "RunnerProfile") {
+				t.Errorf("%s names the switch of %s; only the CI workflow asks for that test", filepath.ToSlash(rel), profileTest)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The workflow: one step for each PowerShell, on Windows only, and the
+	// script itself is started with -NoProfile like every other.
+	workflow := repositoryText(t, ciWorkflow)
+	steps := strings.Split(workflow, "\n      - name: ")
+	asked := 0
+	for _, step := range steps {
+		if !strings.Contains(step, "RunnerProfile") {
+			continue
+		}
+		asked++
+		if !strings.Contains(step, "\n        if: ${{ !cancelled() && runner.os == 'Windows' }}\n") {
+			t.Errorf("the step %q of %s asks for the profile test and is not limited to Windows", strings.SplitN(step, "\n", 2)[0], ciWorkflow)
+		}
+	}
+	if asked != 2 || strings.Count(workflow, "-RunnerProfile") != 2 {
+		t.Errorf("%s asks for the profile test in %d steps, want two: Windows PowerShell 5.1 and PowerShell 7", ciWorkflow, asked)
+	}
+	for what, piece := range map[string]string{
+		"Windows PowerShell 5.1": `run: powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File test\shell\profile.ps1 -RunnerProfile` + "\n",
+		"PowerShell 7":           `run: pwsh -NoLogo -NoProfile -NonInteractive -File test\shell\profile.ps1 -RunnerProfile` + "\n",
+	} {
+		if !strings.Contains(workflow, piece) {
+			t.Errorf("%s does not run the profile test under %s (%q)", ciWorkflow, what, strings.TrimSpace(piece))
 		}
 	}
 }

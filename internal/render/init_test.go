@@ -72,17 +72,82 @@ func TestInitFilesAreStatic(t *testing.T) {
 	}
 }
 
+// The spellings init.ps1 has for the escape character in front of the rest of
+// a sequence: the variable $e inside a string ("$e[34m"), and $e, $s['E'] or
+// $global:__sereno['E'] joined to a string that begins with the bracket
+// ($s['E'] + '[34;1m').
+var powerShellEscape = regexp.MustCompile(`\$e(\[|\]|\\)|\$(?:e|s\['E'\]|global:__sereno\['E'\]) \+ '(\[|\])`)
+
+// A string of init.ps1 that begins like the rest of an SGR sequence and has
+// no escape character in front of it that decodeEscapes knows.
+var sgrTailAlone = regexp.MustCompile(`["']\[[0-9;]*m`)
+
 // decodeEscapes turns the spellings the init files use for the escape
-// character back into the byte: $e and the palette placeholder in init.ps1,
-// \033 in init.bash and init.zsh.
+// character back into the byte: those of powerShellEscape in init.ps1, \033
+// in init.bash and init.zsh.
 func decodeEscapes(shell shells.Shell, text string) string {
 	if shell == shells.PowerShell || shell == shells.Pwsh {
-		return regexp.MustCompile(`\$e(\[|\]|\\)`).ReplaceAllString(text, esc+"$1")
+		return powerShellEscape.ReplaceAllString(text, esc+"$1$2")
 	}
 	return strings.ReplaceAll(text, escSh, esc)
 }
 
 var sgrSequence = regexp.MustCompile(esc + `\[([0-9;]*)m`)
+
+// scanSGR is the scan of R8 on a text whose escape characters are decoded: it
+// returns the number of SGR sequences found and one complaint for each thing
+// that is not allowed.
+//
+// The one exception is in init.ps1 (R25): PowerShell 7 lists directories as
+// ESC[44;1m, and the file names that value once, to compare a style with it.
+// It is allowed on the line that begins "$known =" and nowhere else, and the
+// variable is used once, in a comparison.
+func scanSGR(shell shells.Shell, text string) (int, []string) {
+	const knownStyle = esc + "[44;1m"
+	const knownLine = "$known = " + knownStyle + "'"
+	const knownUse = "if ($old -ceq $known) {"
+	powerShell := shell == shells.PowerShell || shell == shells.Pwsh
+	var complaints []string
+	found, known := 0, 0
+	for _, line := range strings.Split(text, "\n") {
+		for _, match := range sgrSequence.FindAllStringSubmatch(line, -1) {
+			found++
+			if powerShell && match[0] == knownStyle && strings.TrimSpace(line) == knownLine {
+				known++
+				continue
+			}
+			if match[1] == "" {
+				complaints = append(complaints, "an SGR sequence without parameters")
+				continue
+			}
+			numbers, err := palette.ParseSGR(match[1])
+			if err != nil {
+				complaints = append(complaints, strconv.Quote(match[0])+": "+err.Error())
+				continue
+			}
+			for _, n := range numbers {
+				if palette.ForbiddenSGR(n) || !palette.AllowedSGR(n) {
+					complaints = append(complaints, "SGR parameter "+strconv.Itoa(n)+" in "+strconv.Quote(match[0])+" is not allowed (R8)")
+				}
+			}
+		}
+	}
+	if strings.Contains(text, esc+"[") && !sgrSequence.MatchString(text) {
+		complaints = append(complaints, "an escape sequence the scan does not understand")
+	}
+	if powerShell {
+		if known != 1 {
+			complaints = append(complaints, "the style PowerShell 7 lists directories with is named "+strconv.Itoa(known)+" times on a line of its own, want once: "+strconv.Quote(knownLine))
+		}
+		if strings.Count(text, "$known") != 2 || strings.Count(text, knownUse) != 1 {
+			complaints = append(complaints, "$known must be set once and used once, in the comparison "+strconv.Quote(knownUse))
+		}
+		if tail := sgrTailAlone.FindString(text); tail != "" {
+			complaints = append(complaints, "the string "+strconv.Quote(tail)+" begins like an SGR sequence, and the scan does not know the spelling of the escape character in front of it")
+		}
+	}
+	return found, complaints
+}
 
 // TestInitFilesUseSlotsOnly is the scan of R8: inside every SGR sequence of
 // the three files only the allowed parameters appear; none of 38, 48, 40-47,
@@ -90,30 +155,41 @@ var sgrSequence = regexp.MustCompile(esc + `\[([0-9;]*)m`)
 // as well: the ls tables and the zsh prompt.
 func TestInitFilesUseSlotsOnly(t *testing.T) {
 	for _, shell := range initShells {
-		text := decodeEscapes(shell, initFile(t, shell))
-		found := sgrSequence.FindAllStringSubmatch(text, -1)
+		found, complaints := scanSGR(shell, decodeEscapes(shell, initFile(t, shell)))
 		// init.zsh has none: its prompt names slots with %F{n}, checked below.
-		if (shell == shells.Zsh) != (len(found) == 0) || (shell != shells.Zsh && len(found) < 8) {
-			t.Errorf("%s: %d SGR sequences found; the scan is probably broken", shell.InitFile(), len(found))
+		if (shell == shells.Zsh) != (found == 0) || (shell != shells.Zsh && found < 8) {
+			t.Errorf("%s: %d SGR sequences found; the scan is probably broken", shell.InitFile(), found)
 		}
-		for _, match := range found {
-			if match[1] == "" {
-				t.Errorf("%s: an SGR sequence without parameters", shell.InitFile())
-				continue
-			}
-			numbers, err := palette.ParseSGR(match[1])
-			if err != nil {
-				t.Errorf("%s: %q: %v", shell.InitFile(), match[0], err)
-				continue
-			}
-			for _, n := range numbers {
-				if palette.ForbiddenSGR(n) || !palette.AllowedSGR(n) {
-					t.Errorf("%s: SGR parameter %d in %q is not allowed (R8)", shell.InitFile(), n, match[0])
-				}
-			}
+		for _, complaint := range complaints {
+			t.Errorf("%s: %s", shell.InitFile(), complaint)
 		}
-		if strings.Contains(text, "\x1b[") && !sgrSequence.MatchString(text) {
-			t.Errorf("%s: an escape sequence the scan does not understand", shell.InitFile())
+	}
+
+	// The scan sees every spelling init.ps1 has for a sequence, and knows the
+	// one exception by its place, not by its spelling. Each of these lines,
+	// put in the place of the one that writes blue text for directories, must
+	// be reported.
+	ps := initFile(t, shells.PowerShell)
+	const writes = "if ($old -ceq $known) { $m.Value = $s['E'] + '[34;1m' }"
+	if strings.Count(ps, writes) != 1 {
+		t.Fatalf("init.ps1 does not hold the line %s exactly once", writes)
+	}
+	if found, complaints := scanSGR(shells.PowerShell, decodeEscapes(shells.PowerShell, ps)); found < 20 || len(complaints) != 0 {
+		t.Errorf("init.ps1 as it is: %d sequences, complaints %q", found, complaints)
+	}
+	for _, other := range []string{
+		"if ($old -ceq $known) { $m.Value = $s['E'] + '[44;1m' }",
+		"if ($old -ceq $known) { $m.Value = $global:__sereno['E'] + '[44;1m' }",
+		"if ($old -ceq $known) { $m.Value = $e + '[104m' }",
+		"if ($old -ceq $known) { $m.Value = \"$e[1;41m\" }",
+		"if ($old -ceq $known) { $m.Value = $known }",
+		"if ($old -ceq $known) { $m.Value = [string][char]27 + '[44;1m' }",
+		"if ($old -ceq $known) { $m.Value = $s['E'] + '[34;1m' }; $known = $s['E'] + '[45m'",
+		"if ($old -ceq $known) { $m.Value = $s['E'] + '[34;1m' }\n        $known = $s['E'] + '[44;1m'",
+	} {
+		changed := strings.Replace(ps, writes, other, 1)
+		if _, complaints := scanSGR(shells.PowerShell, decodeEscapes(shells.PowerShell, changed)); len(complaints) == 0 {
+			t.Errorf("the scan of R8 passes an init.ps1 with the line %s", other)
 		}
 	}
 
