@@ -873,6 +873,7 @@ try {
             # The $PSStyle of this PowerShell, as a profile may have left it
             # before init.ps1 runs: backgrounds in each of the places R25
             # names. Only this process is changed.
+            CheckEqual $PSStyle.FileInfo.Directory ($E + '[44;1m') 'PowerShell lists directories bold on a blue background: the one style init.ps1 knows as it stands'
             $PSStyle.Progress.Style = $E + '[1;103m'
             $PSStyle.Formatting.TableHeader = $E + '[102;30m'
             $PSStyle.Formatting.Warning = $E + '[38;5;44m'

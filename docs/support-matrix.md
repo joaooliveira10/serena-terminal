@@ -7,27 +7,27 @@ Two tiers:
 - **Tier 1**: the maintainer has it on his own machine, it is tested there, and he is to look at it on screen before a release. That is Windows 11 with Windows Terminal and PowerShell.
 - **Tier 2**: generated and tested by programs. Nobody has looked at the result on a screen.
 
-"Run" below means that the automated tests of this repository ran on that combination and passed. It does not mean that a person has looked at the colours. That check, on screen in Windows Terminal, and a first apply to a real user profile are both still to come.
+"Run" below means that the automated tests of this repository ran on that combination and passed. "In CI" means on a runner hosted by GitHub, in the runs of 2026-10-08: Windows Server 2025, macOS 26 on arm64 and Ubuntu 24.04. What is marked "in CI only" has never run on a machine of the maintainer. None of it means that a person has looked at the colours. That check, on screen in Windows Terminal, and a first apply to a real user profile are both still to come.
 
 ## Systems and shells
 
 | System | Shell or emulator | Tier | State |
 | :--- | :--- | :--- | :--- |
 | Windows 11 | Windows Terminal: the Serena profile and six colour schemes, through a fragment | 1 | The fragment is tested as a file (its bytes, its JSON, its keys against a copy of Windows Terminal's profile schema). Not looked at in Windows Terminal yet. |
-| Windows 11 | Windows PowerShell 5.1 | 1 | Run, on the maintainer's machine (5.1.26100, PSReadLine 2.0.0). |
-| Windows 11 | PowerShell 7 | 1 | Not run yet. The session file is the same as for 5.1 and decides by what it finds. CI will be the first run. |
-| Windows 11 | Git Bash (the bash of Git for Windows) | 2 | Run (bash 5.3.15). |
+| Windows 11 | Windows PowerShell 5.1 | 1 | Run, on the maintainer's machine (5.1.26100, PSReadLine 2.0.0) and in CI. |
+| Windows 11 | PowerShell 7 | 1 | Run in CI only (7.6.6, PSReadLine 2.4.5); it is not installed on the maintainer's machine. The session file is the same as for 5.1 and decides by what it finds. |
+| Windows 11 | Git Bash (the bash of Git for Windows) | 2 | Run (bash 5.3.15), on the maintainer's machine and in CI. |
 | Windows 11 | VS Code's integrated terminal | | Prompt and line-editor colours through a hook line. sereno does not repaint there. Not looked at. |
-| Linux | bash | 2 | Run on Ubuntu 26.04 under WSL (bash 5.3.9). |
-| Linux | zsh | 2 | Not run yet. CI will be the first run. |
-| Linux, macOS | PowerShell 7 | 2 | Not run yet. |
-| macOS | bash 3.2 (the one macOS ships) | 2 | Not run yet. The file is written for bash 3.2. |
-| macOS | zsh | 2 | Not run yet. |
+| Linux | bash | 2 | Run on Ubuntu 26.04 under WSL (bash 5.3.9) and in CI (bash 5.2.21). |
+| Linux | zsh | 2 | Run in CI only (zsh 5.9). |
+| Linux, macOS | PowerShell 7 | 2 | Run in CI only (7.6.6 on Ubuntu, 7.6.5 on macOS). |
+| macOS | bash 3.2 (the one macOS ships) | 2 | Run in CI only (bash 3.2.57). One check is left out there and says so: expanding `PS1` the way a prompt does needs bash 4.4. |
+| macOS | zsh | 2 | Run in CI only (zsh 5.9). |
 | any | Theme files for Ghostty, kitty, WezTerm, Alacritty (`sereno export`) | 2 | Generated; each file is checked against a line grammar of its format. Not loaded into the emulators. |
 
-The program is built for six targets: Windows, macOS and Linux, each on amd64 and arm64. Only the builds for Windows on amd64 and Linux on amd64 have been executed so far. The CI runners add macOS on arm64. The builds for Windows on arm64, Linux on arm64 and macOS on amd64 are compiled in CI and not executed anywhere.
+The program is built for six targets: Windows, macOS and Linux, each on amd64 and arm64. The builds for Windows on amd64 and Linux on amd64 have been executed on the maintainer's machine and in CI, the build for macOS on arm64 in CI only. The builds for Windows on arm64, Linux on arm64 and macOS on amd64 are compiled in CI and not executed anywhere.
 
-The program is tested with Go 1.27. `go.mod` allows Go 1.24 and newer; a CI job builds and tests with 1.24, and that job has not run yet either.
+The program is tested with Go 1.27. `go.mod` allows Go 1.24 and newer; a CI job builds and tests with 1.24 (1.24.13 in the runs of 2026-10-08), and it passes.
 
 ## What you get, by system
 
@@ -48,15 +48,16 @@ The program is tested with Go 1.27. `go.mod` allows Go 1.24 and newer; a CI job 
 - **Constrained language mode.** Where an application control policy (AppLocker, App Control for Business) puts PowerShell into constrained language mode, `init.ps1` leaves the session exactly as it is: no colours, no prompt, no message. This was tried by setting the language mode of a test process; it has not been confirmed on a machine that has such a policy.
 - **Execution policy.** The Serena profile starts PowerShell with `-ExecutionPolicy RemoteSigned` for that one process and stores nothing. By PowerShell's documented rules that is enough under a stored policy of `Restricted`, and a policy set by Group Policy takes precedence over it; neither case has been tried on a machine. A hook line is different: it lives in your profile, and PowerShell does not load a profile under `Restricted` or `AllSigned`. `sereno apply --hook powershell` then refuses, and prints the command that would allow your own scripts (`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`) without running it.
 - **Finding the profile file.** To add a hook line, sereno asks PowerShell once where the profile is. That is the only program sereno ever starts. If PowerShell reports no path (a Documents folder that is missing or out of reach) or does not answer within 15 seconds, the hook is refused; setting `SERENO_PS_PROFILE_PATH` (Windows PowerShell) or `SERENO_PWSH_PROFILE_PATH` (PowerShell 7) to the file tells sereno the answer, and then nothing is started. A Documents folder kept in OneDrive has not been tried.
+- **History predictions** (PSReadLine 2.1 and newer) are switched on only where PSReadLine can show them. On Windows it refuses them in a session whose output is redirected and in a console without virtual terminal sequences; `init.ps1` does not ask for them there. Seen in CI under PowerShell 7.6.6 with PSReadLine 2.4.5: refused with the output redirected, accepted in a console.
 - **A prompt of your own** is never replaced. The Serena prompt is installed only over the stock PowerShell prompt.
-- **Start-up time.** On the maintainer's machine, Windows PowerShell 5.1 needs 67 to 71 ms to load `init.ps1` in a session from the Serena profile and 56 to 59 ms in a session with a hook line, and the first prompt costs another 57 to 58 ms or 33 ms, once. Every later prompt costs under 1 ms. A new Serena tab therefore waits about 125 to 130 ms for sereno, and a session with a hook line about 90 ms, on top of the start of PowerShell itself. PowerShell 7 has not been measured.
+- **Start-up time.** On the maintainer's machine, Windows PowerShell 5.1 needs 67 to 71 ms to load `init.ps1` in a session from the Serena profile and 56 to 59 ms in a session with a hook line, and the first prompt costs another 57 to 58 ms or 33 ms, once. Every later prompt costs under 1 ms. A new Serena tab therefore waits about 125 to 130 ms for sereno, and a session with a hook line about 90 ms, on top of the start of PowerShell itself. PowerShell 7 has been measured on the runners of CI only, once: on the hosted Windows runner it needed 120 ms from the Serena profile and 107 ms with a hook line, where Windows PowerShell 5.1 needed 86 and 69 ms on the same runner; on the Linux runner 86 and 76 ms; on the macOS runner 62 and 57 ms. About 30 ms of that (16 ms on macOS) is the look through `$PSStyle`, which 5.1 does not have.
 - **Text in Portuguese through a pipe.** sereno writes UTF-8. When Windows PowerShell 5.1 captures the output of a program (in a pipe or a variable) it decodes it in the code page of the console, and accented letters come out wrong. On the console itself the text is right.
 
 ### bash and zsh
 
 - **A read-only `PROMPT_COMMAND`** (an audit setting on some shared machines) cannot take sereno's hook. The session then keeps its prompt, does not follow the system, and gets the `ls` colours only. Nothing is printed about it.
 - **A read-only `PS1`** keeps the prompt it has; the session still follows the system. A read-only `LS_COLORS` or `LSCOLORS` is left alone.
-- **zsh**: the same rules for `precmd_functions`, `PROMPT` and `psvar`. They are written from the zsh manual and have not run.
+- **zsh**: the same rules for `precmd_functions`, `PROMPT` and `psvar`. They are written from the zsh manual, and their tests have run in CI only.
 - **Another prompt tool.** With Starship or Oh My Posh active (and, in zsh, Oh My Zsh or Powerlevel10k), sereno does not install its prompt.
 - **Following the system from bash** works only in Git Bash on Windows, where the registry can be read as files. On Linux and macOS there is nothing to follow in version 0.1.
 - **Git Bash's own window.** In the window Git Bash opens by itself (mintty), standard output is not a Windows console. sereno is expected to treat it as "not a terminal" there: no colours in its own output, and `--paint` refused. This has not been checked in that window. Git Bash as a Windows Terminal profile is a console.

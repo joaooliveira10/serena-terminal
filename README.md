@@ -15,7 +15,7 @@ What has been checked so far, and what has not:
 
 - **Run and passing** on Windows 11 with Windows PowerShell 5.1 and Git Bash: the Go tests, the behaviour tests of the PowerShell and bash session files, a run of the built program in a temporary home folder (apply, status, theme, check, export, hook lines, uninstall, with the whole folder compared before and after), and the tests of the install scripts.
 - **Run and passing** on Linux (Ubuntu under WSL): the Go tests, the bash tests, and the tests of the install script under `dash`.
-- **Not run yet anywhere:** PowerShell 7, zsh, and everything on macOS. The CI workflow in this repository will be the first run of those.
+- **Run and passing in CI only** (GitHub-hosted runners, 2026-10-08: Windows Server 2025, macOS 26 on arm64, Ubuntu 24.04): the same tests, and with them everything that is not on the maintainer's machine: PowerShell 7 (7.6.6 on Windows and Linux, 7.6.5 on macOS, with PSReadLine 2.4.5), zsh 5.9 on macOS and Linux, and bash 3.2.57 on macOS. No person has seen any of these on a screen.
 - **Not done yet:** nobody has looked at the result on screen in Windows Terminal, and the program has not been applied to a real user profile; both are planned before the release. The four exported theme formats were not checked in their emulators.
 
 Screenshots will be added to `docs/images` after that acceptance test; there are none yet.
@@ -372,10 +372,10 @@ Tier 1 means: the maintainer has it on his machine and it is tested there. Tier 
 | | State today |
 | :--- | :--- |
 | Windows 11, Windows Terminal, Windows PowerShell 5.1 | Tier 1. Automated tests pass on the maintainer's machine; the check on screen is still to come. |
-| Windows 11, PowerShell 7 | Tier 1 by design, the same session file. Not run yet. |
+| Windows 11, PowerShell 7 | Tier 1 by design, the same session file. Automated tests pass in CI under PowerShell 7.6.6; it is not installed on the maintainer's machine, so nothing was run or seen there. |
 | Git Bash on Windows | Tier 2. Tested. |
-| bash on Linux | Tier 2. Tested on Ubuntu under WSL. |
-| bash 3.2 and zsh on macOS, zsh on Linux | Tier 2. Written, not run yet. |
+| bash on Linux | Tier 2. Tested on Ubuntu under WSL and in CI. |
+| bash 3.2 and zsh on macOS, zsh on Linux | Tier 2. Tested in CI only (bash 3.2.57 and zsh 5.9 on macOS, zsh 5.9 on Ubuntu). |
 | Theme files for Ghostty, kitty, WezTerm, Alacritty | Tier 2. Generated and checked against the grammar of each format; not checked in the emulators. |
 
 [docs/support-matrix.md](docs/support-matrix.md) has the details, including the known limits of each shell.

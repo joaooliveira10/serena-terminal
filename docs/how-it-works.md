@@ -2,7 +2,7 @@
 
 This page explains what `sereno` does once it is applied: how the colours reach the screen, why the shell files contain no colour values, what the settings file holds, and what the check before each prompt costs. Version 0.1 is not released yet, and nothing described here has been looked at on a screen in Windows Terminal yet; where a sentence is about what Windows Terminal does rather than about what sereno does, it says so.
 
-The measurements on this page were taken on 2026-10-08 on one machine: Windows 11, Windows PowerShell 5.1.26100 with PSReadLine 2.0.0, and the bash 5.3.15 of Git for Windows. PowerShell 7 and zsh have not been measured.
+The measurements on this page were taken on 2026-10-08 on one machine: Windows 11, Windows PowerShell 5.1.26100 with PSReadLine 2.0.0, and the bash 5.3.15 of Git for Windows. PowerShell 7 and zsh are not installed on that machine: their figures come from the hosted runners of CI and are marked as such.
 
 ## Three routes for the palette
 
@@ -67,7 +67,7 @@ The slots are chosen to be read against the background of the theme, not against
 | PowerShell 7, directories in listings | bold on a blue background (`44;1`) | 1.45 to 2.23 | the same slot as text (`34;1`); every `$PSStyle` value with a background parameter is treated the same way |
 | GNU `ls`, directories writable by others | blue on green (`34;42`) | 1.01 to 1.44 | text colours only, through `LS_COLORS`; an `LS_COLORS` you already have keeps its entries, and only the ones with a background are rewritten |
 
-The PowerShell 7 row is written from the defaults in its source code; that version has not been run yet.
+The PowerShell 7 row was written from the defaults in its source code and has since been confirmed by the tests in CI under PowerShell 7.6: directories come as `44;1` and leave as `34;1`, and after `init.ps1` no value of `$PSStyle` paints a background.
 
 ## The settings file
 
@@ -129,6 +129,8 @@ What it costs, from three runs of `scripts/bench.ps1`:
 | The bash hook before one prompt, check active | 1.9 to 2.0 ms | 10 ms | 10 ms |
 
 Loading is measured inside the process, around the line that loads the file, as the median of nine fresh processes that have no start-up cache of an earlier PowerShell to replay; that is the slowest case. The prompt figure is the mean of 200 calls. A new Serena tab therefore waits about 125 to 130 ms for sereno before its first prompt, on top of the time PowerShell itself needs to start.
+
+PowerShell 7 and zsh were measured in the same way on the runners of CI, in one run on 2026-10-08. Those are hosted machines, with two processors on Windows and Linux, and one of them can be half as slow again as the next. Loading `init.ps1` under PowerShell 7.6: 120 ms from the Serena profile and 107 ms with a hook line on Windows, where Windows PowerShell 5.1 took 86 and 69 ms on the same runner; 86 and 76 ms on Linux; 62 and 57 ms on macOS. About 30 ms of that (16 ms on macOS) is the look through `$PSStyle`. One prompt with the check active: 0.4 to 0.7 ms. Loading `init.zsh`: 1 ms; its hook before one prompt: 0.3 to 0.4 ms. The gates in CI are the same for PowerShell 7 as for 5.1, and the same for zsh as for bash.
 
 ## The prompt and the line editor
 

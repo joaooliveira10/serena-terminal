@@ -15,7 +15,7 @@ O que já foi conferido, e o que não foi:
 
 - **Rodou e passou** no Windows 11 com Windows PowerShell 5.1 e Git Bash: os testes em Go, os testes de comportamento dos arquivos de sessão do PowerShell e do bash, uma execução do programa compilado numa pasta pessoal temporária (apply, status, theme, check, export, linhas de hook, uninstall, com a pasta inteira comparada antes e depois) e os testes dos scripts de instalação.
 - **Rodou e passou** no Linux (Ubuntu no WSL): os testes em Go, os testes do bash e os testes do script de instalação no `dash`.
-- **Ainda não rodou em lugar nenhum:** o PowerShell 7, o zsh e tudo o que é do macOS. O workflow de CI deste repositório será a primeira execução deles.
+- **Rodou e passou só no CI** (runners hospedados pelo GitHub, em 2026-10-08: Windows Server 2025, macOS 26 em arm64, Ubuntu 24.04): os mesmos testes e, com eles, tudo o que não existe na máquina do mantenedor: o PowerShell 7 (7.6.6 no Windows e no Linux, 7.6.5 no macOS, com PSReadLine 2.4.5), o zsh 5.9 no macOS e no Linux e o bash 3.2.57 no macOS. Ninguém viu nada disso numa tela.
 - **Ainda não foi feito:** ninguém olhou o resultado na tela do Windows Terminal, e o programa não foi aplicado a um perfil de usuário de verdade; as duas coisas estão previstas para antes do lançamento. Os quatro formatos de tema exportados não foram conferidos nos emuladores.
 
 As capturas de tela entram em `docs/images` depois desse teste de aceitação; por enquanto não há nenhuma.
@@ -372,10 +372,10 @@ Nível 1 quer dizer: o mantenedor tem isso na máquina dele, e é ali que é tes
 | | Situação hoje |
 | :--- | :--- |
 | Windows 11, Windows Terminal, Windows PowerShell 5.1 | Nível 1. Os testes automáticos passam na máquina do mantenedor; a conferência na tela ainda está por fazer. |
-| Windows 11, PowerShell 7 | Nível 1 por projeto, com o mesmo arquivo de sessão. Ainda não rodou. |
+| Windows 11, PowerShell 7 | Nível 1 por projeto, com o mesmo arquivo de sessão. Os testes automáticos passam no CI com o PowerShell 7.6.6; ele não está instalado na máquina do mantenedor, então ali nada rodou nem foi visto. |
 | Git Bash no Windows | Nível 2. Testado. |
-| bash no Linux | Nível 2. Testado no Ubuntu, no WSL. |
-| bash 3.2 e zsh no macOS, zsh no Linux | Nível 2. Escrito, ainda não rodou. |
+| bash no Linux | Nível 2. Testado no Ubuntu, no WSL, e no CI. |
+| bash 3.2 e zsh no macOS, zsh no Linux | Nível 2. Testado só no CI (bash 3.2.57 e zsh 5.9 no macOS, zsh 5.9 no Ubuntu). |
 | Arquivos de tema para Ghostty, kitty, WezTerm, Alacritty | Nível 2. Gerados e conferidos contra a gramática de cada formato; não conferidos nos emuladores. |
 
 O [docs/support-matrix.md](docs/support-matrix.md) traz os detalhes, incluindo os limites conhecidos de cada shell.
