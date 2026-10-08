@@ -29,11 +29,11 @@
 #
 # Budgets on the maintainer's machine: 80 ms (Serena profile session), 65 ms
 # (hook session) and 2 ms (prompt). When the variable CI is set, or with -Ci:
-# 150 ms, 150 ms and 10 ms, except that a Serena profile session under
-# PowerShell 7 on Windows has 210 ms (R42 as amended after the first runs in
-# CI: on the hosted Windows runner PowerShell 7 takes 1.3 to 1.4 times as
-# long as Windows PowerShell 5.1 for the same file). The exit code is 1 when a
-# budget is not met or a measurement could not be made.
+# 150 ms, 150 ms and 10 ms, except that PowerShell 7 on Windows has 210 ms
+# for both kinds of session (R42 as amended after the first runs in CI: on
+# the hosted Windows runner PowerShell 7 takes 1.3 to 1.6 times as long as
+# Windows PowerShell 5.1 for the same file). The exit code is 1 when a budget
+# is not met or a measurement could not be made.
 #
 # The local budgets are judged on an idle machine: with other work running, a
 # median over 80 ms says nothing about init.ps1. Run this script again alone
@@ -68,7 +68,7 @@ $loose = $Ci -or [bool]$env:CI
 $initBudget = [ordered]@{ 'Serena profile session' = 80.0; 'hook session' = 65.0 }; $promptBudget = 2.0
 if ($loose) {
     $initBudget = [ordered]@{ 'Serena profile session' = 150.0; 'hook session' = 150.0 }; $promptBudget = 10.0
-    if ($onWindows -and ($PSVersionTable.PSVersion.Major -ge 6)) { $initBudget['Serena profile session'] = 210.0 }
+    if ($onWindows -and ($PSVersionTable.PSVersion.Major -ge 6)) { $initBudget = [ordered]@{ 'Serena profile session' = 210.0; 'hook session' = 210.0 } }
 }
 $failed = $false
 
@@ -229,6 +229,10 @@ $c = [Globalization.CultureInfo]::InvariantCulture
         Write-Output ("    not judged: the first prompt of such a session, in a repository, once: {0} ms" -f (Format-Ms (Get-Median $first)))
         Write-Output ("    not judged: init.ps1 in a session that follows one of its kind, where PowerShell replays its start-up profile: {0} ms" -f (Format-Ms (Get-Median $later)))
         Write-Output ("    not judged: a whole process, {0} ms with init.ps1 and {1} ms without (medians); the difference, {2} ms, moves by more than init.ps1 costs" -f (Format-Ms (Get-Median $with)), (Format-Ms (Get-Median $without)), (Format-Ms ((Get-Median $with) - (Get-Median $without))))
+        # A hosted machine can be half as slow again as the next one, and
+        # init.ps1 with it. Against the start of PowerShell on the same
+        # machine its cost hardly moves.
+        Write-Output ("    not judged: init.ps1 against the start of PowerShell without it on this machine: {0} of it" -f ($cost / (Get-Median $without)).ToString('0.00', [Globalization.CultureInfo]::InvariantCulture))
     }
 
     # 2. the prompt, with the follow check active
