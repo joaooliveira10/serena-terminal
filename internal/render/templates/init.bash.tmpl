@@ -1,0 +1,101 @@
+# Serena Terminal: session setup for bash 3.2 and newer.
+#
+# Written by `sereno apply`, removed by `sereno uninstall`. Do not edit: the
+# next apply would leave an edited copy alone and stop updating it.
+# The file is the same for every user. It prints nothing, starts no process,
+# opens no connection and paints with the 16 palette slots only. The one
+# exception are the palette strings in __sereno_paint, which hand the Serena
+# colours to Windows Terminal when the session follows the system.
+
+case $- in *i*) ;; *) return 0 ;; esac
+[ -z "${__sereno_loaded-}" ] || return 0
+__sereno_loaded=1
+
+# ROOT is the folder above the one this file is in. Git Bash may name the
+# file with a drive letter and backslashes.
+__sereno_root=${BASH_SOURCE[0]-}
+case $__sereno_root in [A-Za-z]:[\\/]*) __sereno_root=${__sereno_root//\\//} ;; esac
+case $__sereno_root in */*) __sereno_root=${__sereno_root%/*} ;; *) __sereno_root=. ;; esac
+case $__sereno_root in /*|[A-Za-z]:/*) ;; *) __sereno_root=$PWD/$__sereno_root ;; esac
+__sereno_root=$__sereno_root/..
+
+<% template "shared" . %>
+
+# Sets __sereno_reply to 1 when the first byte of the file $1 is not zero,
+# else to 0.
+__sereno_byte() {
+    local b=
+    __sereno_reply=0
+    [ -r "$1" ] || return 0
+    LC_ALL=C IFS= read -r -d '' -n 1 b < "$1" || :
+    if [ -n "$b" ]; then __sereno_reply=1; fi
+    return 0
+}
+
+# Runs before every prompt, first in PROMPT_COMMAND. It keeps the exit status
+# of the last command for whatever runs after it.
+__sereno_prompt() {
+    local status=$?
+    if [ -n "$__sereno_term" ]; then __sereno_follow; fi
+    if [ -n "$__sereno_show" ]; then
+        __sereno_find_branch "$PWD"
+        # PS1 names the variable; the branch is never pasted into it, so a
+        # branch called like a command substitution is shown, not run.
+        PS1=$'\\[\033[<% role "prompt.path" %>m\\]\\w\\[\033[0m\\]'
+        if [ -n "$__sereno_branch" ] && shopt -q promptvars; then
+            PS1=$PS1$' \\[\033[<% role "prompt.branch" %>m\\]${__sereno_branch}\\[\033[0m\\]'
+        fi
+        if [ "$status" -eq 0 ]; then
+            PS1=$PS1$'\\n\\[\033[<% role "prompt.ok" %>m\\]>\\[\033[0m\\] '
+        else
+            PS1=$PS1$'\\n\\[\033[<% role "prompt.failed" %>m\\]>\\[\033[0m\\] '
+        fi
+    fi
+    return "$status"
+}
+
+__sereno_init() {
+    __sereno_term= __sereno_profile= __sereno_show= __sereno_last= __sereno_branch=
+    __sereno_hc=0 __sereno_hcl=0 __sereno_light=0 __sereno_variant= __sereno_reply=
+
+    # Where the signals of the system can be read: the registry as Git Bash
+    # shows it. Elsewhere there is nothing to follow.
+    __sereno_reg=${SERENO_REG_ROOT:-/proc/registry/HKEY_CURRENT_USER}
+    [ -d "$__sereno_reg" ] || __sereno_reg=
+
+    if [ -n "${WT_SESSION-}" ] && [ "${TERM_PROGRAM-}" != vscode ]; then __sereno_term=1; fi
+    if [ "${SERENO_SESSION-}" = wt-profile ]; then __sereno_profile=1; fi
+    case ${WT_PROFILE_ID-} in <% .GUIDPattern %>) __sereno_profile=1 ;; esac
+
+    __sereno_settings
+    if [ "$__sereno_prompt_on" = on ] && [ -z "${STARSHIP_SHELL+x}${POSH_PID+x}${POSH_THEME+x}" ]; then
+        __sereno_show=1
+    fi
+
+    # First in PROMPT_COMMAND, in front of whatever is there: a string, or
+    # an array where bash runs every element (5.1 and newer).
+    if [ -n "$__sereno_show$__sereno_term" ]; then
+        if [ -z "${PROMPT_COMMAND+x}" ]; then
+            PROMPT_COMMAND=__sereno_prompt
+        elif [ "${#PROMPT_COMMAND[@]}" -gt 1 ] && { [ "${BASH_VERSINFO[0]}" -gt 5 ] || { [ "${BASH_VERSINFO[0]}" -eq 5 ] && [ "${BASH_VERSINFO[1]}" -ge 1 ]; }; }; then
+            PROMPT_COMMAND=(__sereno_prompt "${PROMPT_COMMAND[@]}")
+        elif [ -n "$PROMPT_COMMAND" ]; then
+            PROMPT_COMMAND=__sereno_prompt$'\n'$PROMPT_COMMAND
+        else
+            PROMPT_COMMAND=__sereno_prompt
+        fi
+    fi
+
+    __sereno_ls_colors
+
+    # The sereno command, when the install script placed it in ROOT/bin and
+    # no program of that name is on PATH. PATH itself is not touched.
+    if [ -f "$__sereno_root/bin/sereno" ] || [ -f "$__sereno_root/bin/sereno.exe" ]; then
+        if ! type -P sereno > /dev/null 2>&1; then
+            function sereno { "$__sereno_root/bin/sereno" "$@"; }
+        fi
+    fi
+    return 0
+}
+__sereno_init
+unset -f __sereno_init __sereno_ls_colors __sereno_ls_value

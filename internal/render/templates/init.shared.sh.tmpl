@@ -1,0 +1,245 @@
+<% define "shared" -%>
+# What follows is the same text in init.bash and init.zsh, written in what
+# bash 3.2 and zsh have in common. It uses builtins only: no command
+# substitution, no pipe, no program.
+
+# Reads ROOT/mode: five lines in a fixed order. A missing or malformed file
+# means the values of a first apply.
+__sereno_settings() {
+    local a= b= c= d= f= x=
+    __sereno_mode=auto __sereno_flavor=soft __sereno_inband=profile __sereno_prompt_on=on
+    [ -r "$__sereno_root/mode" ] || return 0
+    {
+        IFS= read -r a && IFS= read -r b && IFS= read -r c && IFS= read -r d && IFS= read -r f || return 0
+        if IFS= read -r x || [ -n "$x" ]; then return 0; fi
+    } < "$__sereno_root/mode"
+    case $a in mode=auto|mode=dark|mode=light|mode=hc|mode=hc-light) ;; *) return 0 ;; esac
+    case $b in flavor=soft|flavor=vivid) ;; *) return 0 ;; esac
+    case $c in inband=profile|inband=always|inband=off) ;; *) return 0 ;; esac
+    case $d in keys=profile|keys=always|keys=off) ;; *) return 0 ;; esac
+    case $f in prompt=on|prompt=off) ;; *) return 0 ;; esac
+    __sereno_mode=${a#mode=} __sereno_flavor=${b#flavor=} __sereno_inband=${c#inband=} __sereno_prompt_on=${f#prompt=}
+    return 0
+}
+
+# The three signals of the system, as 0 or 1: a contrast theme is on, its
+# window colour is light, applications use the light theme. SERENO_OS_MODE
+# replaces them. Otherwise they are read from the registry files of Git Bash;
+# a value that cannot be read counts as off. Returns 1 when there is nothing
+# to read them from.
+__sereno_signals() {
+    local file= x= r= g= b=
+    __sereno_hc=0 __sereno_hcl=0 __sereno_light=0
+    case ${SERENO_OS_MODE-} in
+        dark) return 0 ;;
+        light) __sereno_light=1; return 0 ;;
+        hc) __sereno_hc=1; return 0 ;;
+        hc-light) __sereno_hc=1 __sereno_hcl=1; return 0 ;;
+    esac
+    [ -n "$__sereno_reg" ] || return 1
+
+    # Flags is text, for example 126; bit 0 means a contrast theme is on.
+    file=$__sereno_reg/'Control Panel/Accessibility/HighContrast/Flags'
+    if [ -r "$file" ]; then
+        IFS=$' \t' read -r r x < "$file" || :
+        r=${r%$'\0'} x=${x%$'\0'}
+        r=${r%$'\r'}
+        case $r in
+            ''|*[!0-9]*) ;;
+            *)
+                if [ -z "$x" ] && [ "${#r}" -le 10 ] && [ "$((10#$r))" -le 4294967295 ]; then
+                    case $r in *[13579]) __sereno_hc=1 ;; esac
+                fi ;;
+        esac
+    fi
+
+    # Window is "R G B" in decimal; the theme is a light one when
+    # 0.2126 R + 0.7152 G + 0.0722 B is above 127.
+    file=$__sereno_reg/'Control Panel/Colors/Window'
+    if [ -r "$file" ]; then
+        r= g= b= x=
+        IFS=$' \t' read -r r g b x < "$file" || :
+        r=${r%$'\0'} g=${g%$'\0'} b=${b%$'\0'} x=${x%$'\0'}
+        b=${b%$'\r'}
+        case $r:$g:$b:$x in
+            *[!0-9:]*|:*|*::*|*[!:]) ;;
+            *)
+                if [ "${#r}" -le 3 ] && [ "${#g}" -le 3 ] && [ "${#b}" -le 3 ]; then
+                    r=$((10#$r)) g=$((10#$g)) b=$((10#$b))
+                    if [ "$r" -le 255 ] && [ "$g" -le 255 ] && [ "$b" -le 255 ] && [ "$((2126 * r + 7152 * g + 722 * b))" -gt 1270000 ]; then
+                        __sereno_hcl=1
+                    fi
+                fi ;;
+        esac
+    fi
+
+    # AppsUseLightTheme is a number of four raw bytes.
+    __sereno_byte "$__sereno_reg/Software/Microsoft/Windows/CurrentVersion/Themes/Personalize/AppsUseLightTheme"
+    if [ "$__sereno_reply" = 1 ]; then __sereno_light=1; fi
+    return 0
+}
+
+# The resolution table: mode, flavour and the three signals give a variant.
+__sereno_resolve() {
+    local v=dark
+    case $1 in
+        hc) __sereno_variant=hc; return 0 ;;
+        hc-light) __sereno_variant=hc-light; return 0 ;;
+        dark) ;;
+        light) v=light ;;
+        *)
+            if [ "$3" = 1 ]; then
+                if [ "$4" = 1 ]; then __sereno_variant=hc-light; else __sereno_variant=hc; fi
+                return 0
+            fi
+            if [ "$5" = 1 ]; then v=light; fi ;;
+    esac
+    if [ "$2" = vivid ]; then v=$v-vivid; fi
+    __sereno_variant=$v
+    return 0
+}
+
+# Writes PALETTE of a variant to the terminal: OSC 10, 11, 12, 17 and 4;0-15,
+# each ending in ESC \. With the argument reset it writes RESET.
+__sereno_paint() {
+    case $1 in
+<%- range .Variants %>
+        <% .ID %>) printf '<% .Sh %>' ;;
+<%- end %>
+        reset) printf '<% .ResetSh %>' ;;
+    esac
+    return 0
+}
+
+# Following the system, run before every prompt inside Windows Terminal: read
+# the mode file, resolve the variant and, only when it is not the one painted
+# last, write its palette. When the mode file no longer allows painting, the
+# palette this session painted is handed back once.
+__sereno_follow() {
+    local on=
+    __sereno_settings
+    case $__sereno_inband in
+        always) on=1 ;;
+        profile) on=$__sereno_profile ;;
+    esac
+    if [ -z "$on" ]; then
+        if [ -n "$__sereno_last" ]; then __sereno_last=; __sereno_paint reset; fi
+        return 0
+    fi
+    __sereno_signals || return 0
+    __sereno_resolve "$__sereno_mode" "$__sereno_flavor" "$__sereno_hc" "$__sereno_hcl" "$__sereno_light"
+    if [ "$__sereno_variant" != "$__sereno_last" ]; then
+        __sereno_last=$__sereno_variant
+        __sereno_paint "$__sereno_variant"
+    fi
+    return 0
+}
+
+# Finds the branch of the repository that holds the directory $1 without
+# running git: walk up to a .git directory, or to a .git file whose gitdir
+# line names one, and read HEAD there. The result goes to __sereno_branch,
+# empty when there is none.
+__sereno_find_branch() {
+    local dir=$1 git= line= head=
+    __sereno_branch=
+    while :; do
+        git=$dir/.git
+        if [ -d "$git" ]; then head=$git/HEAD; break; fi
+        if [ -f "$git" ] && [ -r "$git" ]; then
+            line=
+            IFS= read -r line < "$git" || :
+            line=${line%$'\r'}
+            case $line in
+                'gitdir: '*)
+                    line=${line#gitdir: }
+                    case $line in /*|[A-Za-z]:[\\/]*) ;; *) line=$dir/$line ;; esac
+                    if [ -d "$line" ]; then head=$line/HEAD; break; fi ;;
+            esac
+        fi
+        [ -n "$dir" ] || break
+        case $dir in */*) dir=${dir%/*} ;; *) dir= ;; esac
+    done
+    if [ -z "$head" ] || [ ! -r "$head" ]; then return 0; fi
+    line=
+    IFS= read -r line < "$head" || :
+    line=${line%$'\r'}
+    case $line in
+        'ref: refs/heads/'*) __sereno_branch=${line#ref: refs/heads/} ;;
+        *) __sereno_branch=${line:0:7} ;;
+    esac
+    __sereno_branch=${__sereno_branch//[[:cntrl:]]/}
+    return 0
+}
+
+# One entry of LS_COLORS whose value may hold a background. $1 is the key and
+# $2 the value; __sereno_reply receives the value to use. A background
+# parameter is 40-47 or 100-107; the numbers after 38 and 48 are colour
+# arguments and are not looked at. The file types ls paints with a background
+# by default get a foreground of their own, any other entry just loses the
+# parameter.
+__sereno_ls_value() {
+    local rest=$2 p= out= sep= skip=0 bad=
+    while :; do
+        p=${rest%%;*}
+        if [ "$skip" = 9 ]; then
+            case $p in 5) skip=1 ;; 2) skip=3 ;; *) skip=0 ;; esac
+            out=$out$sep$p sep=';'
+        elif [ "$skip" -gt 0 ]; then
+            skip=$((skip - 1))
+            out=$out$sep$p sep=';'
+        else
+            case $p in
+                4[0-7]|10[0-7]) bad=1 ;;
+                38|48) skip=9; out=$out$sep$p sep=';' ;;
+                *) out=$out$sep$p sep=';' ;;
+            esac
+        fi
+        case $rest in *';'*) rest=${rest#*;} ;; *) break ;; esac
+    done
+    __sereno_reply=$2
+    [ -n "$bad" ] || return 0
+    __sereno_reply=$out
+    case $1 in
+        su) __sereno_reply='1;31' ;;
+        sg|bd|cd) __sereno_reply='1;33' ;;
+        tw|ow|st) __sereno_reply='4;34' ;;
+        ca|or|mi) __sereno_reply=31 ;;
+        pi) __sereno_reply=33 ;;
+        do) __sereno_reply='1;35' ;;
+    esac
+    return 0
+}
+
+# Colours of ls. GNU ls paints some file types as a foreground slot on a
+# background slot, which cannot be read on any Serena variant; these settings
+# use foregrounds only. Nothing else about ls is touched.
+__sereno_ls_colors() {
+    local rest= out= sep= entry= key= val=
+    if [ -z "${LS_COLORS+x}" ]; then
+        LS_COLORS='di=1;34:ln=36:so=35:pi=33:ex=1;32:bd=1;33:cd=1;33:su=1;31:sg=1;33:tw=4;34:ow=4;34:st=4;34:or=31:mi=31'
+        export LS_COLORS
+    else
+        rest=$LS_COLORS
+        while :; do
+            entry=${rest%%:*}
+            case $entry in
+                *=*)
+                    key=${entry%%=*} val=${entry#*=}
+                    case ";$val;" in
+                        *';4'[0-7]';'*|*';10'[0-7]';'*)
+                            __sereno_ls_value "$key" "$val"
+                            entry=$key=$__sereno_reply ;;
+                    esac ;;
+            esac
+            out=$out$sep$entry sep=:
+            case $rest in *:*) rest=${rest#*:} ;; *) break ;; esac
+        done
+        if [ "$out" != "$LS_COLORS" ]; then LS_COLORS=$out; fi
+    fi
+    if [ -z "${LSCOLORS+x}" ]; then
+        LSCOLORS=exfxcxdxbxDxDxBxDxExEx
+        export LSCOLORS
+    fi
+    return 0
+}
+<%- end %>

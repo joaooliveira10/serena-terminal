@@ -1,0 +1,50 @@
+{
+    "profiles": [<% with .Profile %>
+        {
+            "guid": <% json .GUID %>,
+            "name": <% json .Name %>,
+            "commandline": <% json .CommandLine %>,
+            "colorScheme": <% if .Scheme %><% json .Scheme %><% else %>{
+                "dark": <% json .SchemeDark %>,
+                "light": <% json .SchemeLight %>
+            }<% end %>,
+            "font": {
+                "face": "Cascadia Code"
+            },
+            "environment": {
+                "SERENO_SESSION": "wt-profile",
+                "POWERSHELL_TELEMETRY_OPTOUT": "1",
+                "POWERSHELL_UPDATECHECK": "Off"
+            },
+            "autoMarkPrompts": true,
+            "showMarksOnScrollbar": true
+        }
+    <% end %>],
+    "schemes": [
+<%- range $i, $s := .Schemes %><% if $i %>,<% end %>
+        {
+            "name": <% json $s.Name %>,
+            "background": "<% $s.Background %>",
+            "foreground": "<% $s.Foreground %>",
+            "cursorColor": "<% $s.Cursor %>",
+            "selectionBackground": "<% $s.SelectionBackground %>",
+            "black": "<% index $s.ANSI 0 %>",
+            "red": "<% index $s.ANSI 1 %>",
+            "green": "<% index $s.ANSI 2 %>",
+            "yellow": "<% index $s.ANSI 3 %>",
+            "blue": "<% index $s.ANSI 4 %>",
+            "purple": "<% index $s.ANSI 5 %>",
+            "cyan": "<% index $s.ANSI 6 %>",
+            "white": "<% index $s.ANSI 7 %>",
+            "brightBlack": "<% index $s.ANSI 8 %>",
+            "brightRed": "<% index $s.ANSI 9 %>",
+            "brightGreen": "<% index $s.ANSI 10 %>",
+            "brightYellow": "<% index $s.ANSI 11 %>",
+            "brightBlue": "<% index $s.ANSI 12 %>",
+            "brightPurple": "<% index $s.ANSI 13 %>",
+            "brightCyan": "<% index $s.ANSI 14 %>",
+            "brightWhite": "<% index $s.ANSI 15 %>"
+        }
+<%- end %>
+    ]
+}

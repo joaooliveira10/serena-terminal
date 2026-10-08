@@ -1,0 +1,743 @@
+# Behaviour tests of init.ps1 (test plan T7; requirements R23 to R30 and R34).
+#
+#   powershell -NoProfile -ExecutionPolicy Bypass -File test\shell\run.ps1
+#   pwsh -NoProfile -File test/shell/run.ps1
+#
+# The file runs under Windows PowerShell 5.1 and PowerShell 7 and tests the
+# PowerShell that runs it. It prints one line per check ("ok - ..." or
+# "not ok - ...") and ends with exit code 1 when a check failed.
+#
+# -Init    a rendered init.ps1; default testdata/golden/init/init.ps1, which
+#          the Go tests keep equal to what the renderer produces
+# -Golden  the folder with palette/<variant>.bin; default testdata/golden
+# -Modes   the shared truth table; default testdata/modes.tsv
+# -Only    run only the sessions whose name contains this text
+#
+# How it works: every scenario is a "session", a fresh child process of the
+# same PowerShell started with -NoProfile, that dot-sources init.ps1 the way a
+# profile would and then looks at the result. Nothing outside a temporary
+# folder is written: the children get that folder as HOME, USERPROFILE,
+# LOCALAPPDATA and APPDATA, PSReadLine is told to save no history, and PATH is
+# an empty folder, so a child that tried to start a program would fail. The
+# system's appearance is never changed: SERENO_OS_MODE stands in for it.
+[CmdletBinding()]
+param(
+    [string]$Init = '',
+    [string]$Golden = '',
+    [string]$Modes = '',
+    [string]$Only = ''
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+if (-not $Init) { $Init = Join-Path $repo 'testdata/golden/init/init.ps1' }
+if (-not $Golden) { $Golden = Join-Path $repo 'testdata/golden' }
+if (-not $Modes) { $Modes = Join-Path $repo 'testdata/modes.tsv' }
+$Init = (Resolve-Path -LiteralPath $Init).Path
+$Golden = (Resolve-Path -LiteralPath $Golden).Path
+$Modes = (Resolve-Path -LiteralPath $Modes).Path
+
+$exe = (Get-Process -Id $PID).Path
+$onWindows = ($env:OS -eq 'Windows_NT')
+$sep = [string][IO.Path]::DirectorySeparatorChar
+
+if (-not (([Environment]::GetCommandLineArgs() -join ' ') -match '(?i)-nop')) {
+    [Console]::Error.WriteLine('run.ps1: start it with -NoProfile, so that no real profile takes part in the test')
+    exit 2
+}
+
+$script:passed = 0; $script:failed = 0; $script:skipped = 0
+function Report([string]$line) {
+    if ($line.StartsWith('ok - ')) { $script:passed++ }
+    elseif ($line.StartsWith('not ok - ')) { $script:failed++ }
+    elseif ($line.StartsWith('skip - ')) { $script:skipped++ }
+    [Console]::Out.WriteLine($line)
+}
+function Check([bool]$condition, [string]$name, [string]$detail = '') {
+    if ($condition) { Report "ok - $name" } else { Report "not ok - $name"; if ($detail) { [Console]::Out.WriteLine("#   $detail") } }
+}
+
+# ---------------------------------------------------------------------------
+# The file itself, before anything runs it.
+
+$tokens = $null; $parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Init, [ref]$tokens, [ref]$parseErrors)
+Check ($parseErrors.Count -eq 0) "init.ps1 parses without errors on PowerShell $($PSVersionTable.PSVersion)" (($parseErrors | ForEach-Object { $_.ToString() }) -join '; ')
+
+$bytes = [IO.File]::ReadAllBytes($Init)
+$odd = @($bytes | Where-Object { ($_ -ne 10) -and (($_ -lt 32) -or ($_ -gt 126)) })
+Check ($odd.Count -eq 0) 'init.ps1 holds only printable ASCII and line feeds' "$($odd.Count) other bytes"
+$text = [IO.File]::ReadAllText($Init)
+Check ($text.Contains('[char]27') -and -not $text.Contains('`e')) 'init.ps1 makes the escape character with [char]27, never with the backtick-e escape'
+
+# Every command the file can run, read off the syntax tree: PSReadLine's
+# cmdlets and the saved prompt are called through a variable, Get-History by
+# its full name. Any other command name would be a program or a module.
+$commands = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true))
+$strange = @(foreach ($command in $commands) {
+        $name = $command.GetCommandName()
+        if ($name) { if ($name -ne 'Microsoft.PowerShell.Core\Get-History') { $name } }
+        elseif (-not ($command.CommandElements[0] -is [System.Management.Automation.Language.VariableExpressionAst] -or
+                $command.CommandElements[0] -is [System.Management.Automation.Language.IndexExpressionAst] -or
+                $command.CommandElements[0] -is [System.Management.Automation.Language.ScriptBlockExpressionAst])) { $command.Extent.Text }
+    })
+Check ($commands.Count -gt 5 -and $strange.Count -eq 0) 'init.ps1 names no command besides Get-History: it can start no program and import no module' ($strange -join ', ')
+
+# The .NET types it touches: files, the registry (read), the console, text.
+$allowedTypes = 'bool', 'byte', 'char', 'Console', 'int', 'long', 'regex', 'ref', 'string', 'uint32',
+    'Microsoft.Win32.Registry', 'System.Globalization.CultureInfo', 'System.IO.Directory', 'System.IO.File', 'System.IO.Path', 'System.StringComparison'
+$types = @($ast.FindAll({ param($node) ($node -is [System.Management.Automation.Language.TypeExpressionAst]) -or ($node -is [System.Management.Automation.Language.ConvertExpressionAst]) -or ($node -is [System.Management.Automation.Language.TypeConstraintAst]) }, $true) |
+        ForEach-Object { if ($_ -is [System.Management.Automation.Language.ConvertExpressionAst]) { $_.Type.TypeName.FullName } else { $_.TypeName.FullName } } | Sort-Object -Unique)
+$foreign = @($types | Where-Object { $allowedTypes -notcontains $_ })
+Check ($types.Count -gt 8 -and $foreign.Count -eq 0) 'init.ps1 uses no type that could start a process or open a connection' ($foreign -join ', ')
+
+# ---------------------------------------------------------------------------
+# The temporary world of the sessions.
+
+$tmp = Join-Path ([IO.Path]::GetTempPath()) ('sereno-ps-' + [guid]::NewGuid().ToString('N'))
+$userHome = Join-Path $tmp 'home'
+# ROOT in its default place, so that the hook line of R21 finds it:
+# %LOCALAPPDATA%\sereno on Windows, ~/.local/share/sereno elsewhere.
+$dataHome = Join-Path $userHome '.local/share'
+$root = Join-Path $dataHome 'sereno'
+$hookLine = 'if (Test-Path -LiteralPath "$HOME/.local/share/sereno/shell/init.ps1") { . "$HOME/.local/share/sereno/shell/init.ps1" } # sereno:hook'
+if ($onWindows) {
+    $root = Join-Path $userHome 'local\sereno'
+    $hookLine = 'if (Test-Path -LiteralPath "$env:LOCALAPPDATA\sereno\shell\init.ps1") { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook'
+}
+$emptyPath = Join-Path $tmp 'empty-path'
+$sessionDir = Join-Path $tmp 'sessions'
+foreach ($dir in $tmp, $userHome, $dataHome, (Join-Path $userHome 'local'), $root, (Join-Path $root 'shell'), $emptyPath, $sessionDir,
+    (Join-Path $userHome 'roaming'), (Join-Path $userHome 'work'), (Join-Path $tmp 'homex')) {
+    $null = New-Item -ItemType Directory -Path $dir -Force
+}
+$root = (Resolve-Path -LiteralPath $root).Path
+$userHome = (Resolve-Path -LiteralPath $userHome).Path
+$initCopy = Join-Path $root (Join-Path 'shell' 'init.ps1')
+Copy-Item -LiteralPath $Init -Destination $initCopy
+$modeFile = Join-Path $root 'mode'
+$defaultMode = "mode=auto`nflavor=soft`ninband=profile`nkeys=profile`nprompt=on`n"
+
+# A repository without git: a branch, a detached head, a worktree whose .git
+# is a file, and a .git file that leads nowhere.
+function New-Tree([string]$base, [hashtable]$files) {
+    foreach ($name in $files.Keys) {
+        $path = Join-Path $base $name
+        $null = New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force
+        [IO.File]::WriteAllText($path, $files[$name])
+    }
+}
+New-Tree $userHome @{
+    'repo/.git/HEAD' = "ref: refs/heads/feature/x`n"
+    'repo/sub/deep/keep.txt' = ''
+    'detached/.git/HEAD' = "0123456789abcdef0123456789abcdef01234567`n"
+    'detached/keep.txt' = ''
+    'crlf/.git/HEAD' = "ref: refs/heads/main`r`n"
+    'crlf/keep.txt' = ''
+    'main/.git/worktrees/wt/HEAD' = "ref: refs/heads/side`n"
+    'main/.git/HEAD' = "ref: refs/heads/main`n"
+    'worktree/.git' = "gitdir: ../main/.git/worktrees/wt`n"
+    'worktree/keep.txt' = ''
+    'repo/broken/.git' = "gitdir: ../nowhere`n"
+    'repo/broken/keep.txt' = ''
+    'hostile/.git/HEAD' = "ref: refs/heads/a" + [char]27 + "]0;x" + [char]7 + "b`n"
+    'hostile/keep.txt' = ''
+}
+
+$baseEnv = @{
+    HOME = $userHome; USERPROFILE = $userHome
+    LOCALAPPDATA = (Join-Path $userHome 'local'); APPDATA = (Join-Path $userHome 'roaming')
+    XDG_DATA_HOME = $dataHome; HISTFILE = (Join-Path $userHome '.bash_history')
+    SERENO_HOME = $root; SERENO_SANDBOX = $tmp; PATH = $emptyPath
+    SERENO_OS_MODE = ''; SERENO_SESSION = ''; SERENO_REG_ROOT = ''; SERENO_LANG = ''
+    WT_SESSION = ''; WT_PROFILE_ID = ''; TERM_PROGRAM = ''
+    SERENO_T_INIT = $initCopy; SERENO_T_ROOT = $root; SERENO_T_GOLDEN = $Golden; SERENO_T_MODES = $Modes
+    SERENO_T_HOME = $userHome; SERENO_T_TMP = $tmp; SERENO_T_HOOK = $hookLine
+}
+if ($onWindows) { $baseEnv['HOMEDRIVE'] = $userHome.Substring(0, 2); $baseEnv['HOMEPATH'] = $userHome.Substring(2) }
+
+function Start-Child([string]$arguments, [hashtable]$extraEnv, [string]$directory) {
+    $info = New-Object System.Diagnostics.ProcessStartInfo
+    $info.FileName = $exe
+    $info.Arguments = $arguments
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardInput = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $info.WorkingDirectory = $directory
+    foreach ($pair in @($baseEnv.GetEnumerator()) + @($extraEnv.GetEnumerator())) { $info.EnvironmentVariables[$pair.Key] = [string]$pair.Value }
+    $process = [Diagnostics.Process]::Start($info)
+    $process.StandardInput.Close()
+    $errTask = $process.StandardError.ReadToEndAsync()
+    $outTask = $process.StandardOutput.ReadToEndAsync()
+    if (-not $process.WaitForExit(120000)) { $process.Kill(); $process.WaitForExit() }
+    $result = [pscustomobject]@{ Out = $outTask.Result; Err = $errTask.Result; Code = $process.ExitCode }
+    $process.Dispose()
+    $result
+}
+
+# What every session script starts with.
+$library = {
+    Set-StrictMode -Version Latest
+    $ErrorActionPreference = 'Stop'
+    $E = [string][char]27
+    $BEL = [string][char]7
+    $LF = "`n"
+    $T = @{
+        Init = $env:SERENO_T_INIT; Root = $env:SERENO_T_ROOT; Golden = $env:SERENO_T_GOLDEN; Modes = $env:SERENO_T_MODES
+        Home = $env:SERENO_T_HOME; Tmp = $env:SERENO_T_TMP; Windows = ($env:OS -eq 'Windows_NT'); Sep = [string][IO.Path]::DirectorySeparatorChar
+        ModeFile = (Join-Path $env:SERENO_T_ROOT 'mode'); Stamp = [datetime]::UtcNow
+    }
+    # $HOME is what the prompt shortens to ~. PowerShell 7 does not take it
+    # from the environment on Windows, so it is set here.
+    Set-Variable -Name HOME -Value $T.Home -Force -Scope Global
+
+    function Show([string]$text) {
+        if ($null -eq $text) { return '<null>' }
+        $text.Replace([string][char]27, '<ESC>').Replace([string][char]7, '<BEL>').Replace("`r", '<CR>').Replace("`n", '<LF>')
+    }
+    function Check([bool]$condition, [string]$name, [string]$detail = '') {
+        if ($condition) { [Console]::Out.WriteLine("ok - $name") }
+        else { [Console]::Out.WriteLine("not ok - $name"); if ($detail) { [Console]::Out.WriteLine("#   $detail") } }
+    }
+    function CheckEqual([string]$got, [string]$want, [string]$name) {
+        Check ($got -ceq $want) $name ("got  " + (Show $got) + "`n#   want " + (Show $want))
+    }
+    function Skip([string]$name) { [Console]::Out.WriteLine("skip - $name") }
+    # Runs a block with [Console]::Out replaced, and returns what was written
+    # to the console and what the block returned.
+    function Capture([scriptblock]$action) {
+        $writer = New-Object System.IO.StringWriter
+        $console = [Console]::Out
+        [Console]::SetOut($writer)
+        try { $output = @(& $action) } finally { [Console]::SetOut($console) }
+        [pscustomobject]@{ Console = $writer.ToString(); Output = $output; Text = ($output -join '') }
+    }
+    function Palette([string]$variant) { [IO.File]::ReadAllText((Join-Path $T.Golden (Join-Path 'palette' ($variant + '.bin')))) }
+    # Writes the mode file with a time of its own, as a later `sereno theme` would.
+    function Set-Mode([string]$content) {
+        [IO.File]::WriteAllText($T.ModeFile, $content)
+        $T.Stamp = $T.Stamp.AddSeconds(5)
+        [IO.File]::SetLastWriteTimeUtc($T.ModeFile, $T.Stamp)
+    }
+    function Mode([string]$mode = 'auto', [string]$flavor = 'soft', [string]$inband = 'profile', [string]$keys = 'profile', [string]$prompt = 'on') {
+        "mode=$mode`nflavor=$flavor`ninband=$inband`nkeys=$keys`nprompt=$prompt`n"
+    }
+    # The prompt of R26 for a path, without marks.
+    function Plain([string]$path, [string]$branch = '', [string]$took = '', [bool]$ok = $true, [int]$level = 0) {
+        $text = $E + '[34m' + $path + $E + '[0m'
+        if ($branch) { $text += ' ' + $E + '[35m' + $branch + $E + '[0m' }
+        if ($took) { $text += ' ' + $E + '[90m' + $took + $E + '[0m' }
+        $colour = '[32m'; if (-not $ok) { $colour = '[31m' }
+        $text + $LF + $E + $colour + ('>' * ($level + 1)) + $E + '[0m '
+    }
+    function Go([string]$relative) { Set-Location -LiteralPath (Join-Path $T.Home $relative) }
+}
+
+$withReadLine = {
+    Import-Module PSReadLine
+    if ((Get-Command Set-PSReadLineOption).Parameters.ContainsKey('HistorySaveStyle')) { Set-PSReadLineOption -HistorySaveStyle SaveNothing }
+}
+
+# Runs one session: a child process that executes library + body and prints
+# check lines.
+function Invoke-Session([string]$name, [hashtable]$environment, [string]$mode, [scriptblock]$body, [bool]$readLine = $true) {
+    if ($Only -and -not $name.Contains($Only)) { return }
+    [Console]::Out.WriteLine("# session: $name")
+    if ($mode -eq '<none>') { if (Test-Path -LiteralPath $modeFile) { Remove-Item -LiteralPath $modeFile -Force } }
+    else { [IO.File]::WriteAllText($modeFile, $mode) }
+    $script = $library.ToString() + "`n"
+    if ($readLine) { $script += $withReadLine.ToString() + "`n" }
+    $script += $body.ToString() + "`n"
+    $file = Join-Path $sessionDir (($name -replace '[^A-Za-z0-9]+', '-') + '.ps1')
+    [IO.File]::WriteAllText($file, $script)
+    $arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $file + '"'
+    if (-not $onWindows) { $arguments = '-NoLogo -NoProfile -NonInteractive -File "' + $file + '"' }
+    $child = Start-Child $arguments $environment (Join-Path $userHome 'work')
+    $lines = 0
+    foreach ($line in ($child.Out -split "`r?`n")) {
+        if ($line -eq '') { continue }
+        if ($line -match '^(ok|not ok|skip) - ' -or $line.StartsWith('#')) { Report $line; $lines++ }
+        else { Report "not ok - $name wrote something that is not a check line: $line" }
+    }
+    Check ($child.Code -eq 0 -and $child.Err.Trim() -eq '') "$name ran to its end without an error" ("exit code $($child.Code): " + $child.Err.Trim())
+    Check ($lines -gt 0) "$name reported at least one check"
+}
+
+$profileSession = @{ WT_SESSION = 'test-session'; SERENO_SESSION = 'wt-profile'; SERENO_OS_MODE = 'dark' }
+
+try {
+    # -----------------------------------------------------------------------
+    Invoke-Session 'Serena profile session in Windows Terminal' $profileSession $defaultMode {
+        $stock = '"PS $($executionContext.SessionState.Path.CurrentLocation)$(''>'' * ($nestedPromptLevel + 1)) ";'
+        $definition = (@($function:prompt.ToString() -split "`r?`n" | Where-Object { -not $_.TrimStart().StartsWith('#') }) -join "`n").Trim()
+        CheckEqual $definition $stock 'the stock prompt of this PowerShell is the one R26 expects'
+
+        # Dot-sourcing changes nothing of the caller and prints nothing. It
+        # is done here, at the top of the script, as a profile does it: a
+        # variable the file created would stay behind in this scope.
+        $global:LASTEXITCODE = 7
+        $location = (Get-Location).Path
+        $preference = $ErrorActionPreference
+        $errorsBefore = $Error.Count
+        $optionsBefore = Get-PSReadLineOption
+        $predictionBefore = $null
+        if ($optionsBefore.PSObject.Properties['PredictionSource']) { $predictionBefore = [string]$optionsBefore.PredictionSource }
+        $modulesBefore = @(Get-Module | ForEach-Object { $_.Name } | Sort-Object) -join ','
+        $writer = New-Object System.IO.StringWriter
+        $console = [Console]::Out
+        $output = $null; $after = $null; $before = $null
+        $before = @(Get-Variable | ForEach-Object { $_.Name })
+        [Console]::SetOut($writer)
+        try { $output = @(. $T.Init) } finally { [Console]::SetOut($console) }
+        $after = @(Get-Variable | ForEach-Object { $_.Name })
+        CheckEqual (@($after | Where-Object { $before -notcontains $_ }) -join ',') '__sereno' 'init.ps1 creates exactly one variable, $__sereno'
+        CheckEqual $writer.ToString() '' 'init.ps1 writes nothing to the console'
+        Check ($output.Count -eq 0) 'init.ps1 returns nothing'
+        CheckEqual (Get-Location).Path $location 'init.ps1 leaves the location alone'
+        CheckEqual ([string]$ErrorActionPreference) ([string]$preference) 'init.ps1 leaves $ErrorActionPreference alone'
+        Check ($global:LASTEXITCODE -eq 7) 'init.ps1 leaves $LASTEXITCODE alone'
+        Check ($Error.Count -eq $errorsBefore) 'init.ps1 leaves $Error empty: nothing in it failed' ($(if ($Error.Count) { [string]$Error[0] }))
+        CheckEqual (@(Get-Module | ForEach-Object { $_.Name } | Sort-Object) -join ',') $modulesBefore 'init.ps1 imports no module'
+
+        # R24: the colours of the line editor.
+        $options = Get-PSReadLineOption
+        $wanted = [ordered]@{
+            CommandColor = '[34m'; KeywordColor = '[35m'; StringColor = '[32m'; NumberColor = '[93m'; TypeColor = '[33m'; MemberColor = '[36m'
+            VariableColor = '[39m'; ParameterColor = '[3;37m'; OperatorColor = '[37m'; CommentColor = '[90m'; ErrorColor = '[91m'
+            EmphasisColor = '[96m'; SelectionColor = '[7m'; DefaultTokenColor = '[39m'; ContinuationPromptColor = '[90m'
+        }
+        $wrong = @(foreach ($name in $wanted.Keys) { if ([string]$options.$name -cne ($E + $wanted[$name])) { $name + '=' + (Show ([string]$options.$name)) } })
+        Check ($wrong.Count -eq 0) 'PSReadLine has the fifteen colours of R24' ($wrong -join ', ')
+        $later = [ordered]@{ InlinePredictionColor = '[90m'; ListPredictionColor = '[33m'; ListPredictionSelectedColor = '[7m' }
+        foreach ($name in $later.Keys) {
+            if ($options.PSObject.Properties[$name]) { CheckEqual ([string]$options.$name) ($E + $later[$name]) "PSReadLine has $name, and it is set" }
+            else { Check $true "PSReadLine $((Get-Module PSReadLine).Version) has no $name, and init.ps1 did not try to set it" }
+        }
+
+        # R25: the pairs measured as unreadable.
+        if (Test-Path variable:PSStyle) {
+            $values = @($PSStyle.Progress.Style) + @($PSStyle.Formatting.PSObject.Properties | ForEach-Object { $_.Value }) +
+                @($PSStyle.FileInfo.Directory, $PSStyle.FileInfo.SymbolicLink, $PSStyle.FileInfo.Executable) + @($PSStyle.FileInfo.Extension.Keys | ForEach-Object { $PSStyle.FileInfo.Extension[$_] })
+            $painted = @($values | Where-Object { $_ -is [string] } | Where-Object { [regex]::IsMatch($_, $E + '\[(?:[0-9;]*;)?(4[0-7]|10[0-7])(?:;[0-9;]*)?m') })
+            Check ($values.Count -gt 10 -and $painted.Count -eq 0) 'no $PSStyle value of R25 paints a background' (($painted | ForEach-Object { Show $_ }) -join ', ')
+            Check (-not $PSStyle.FileInfo.Directory.Contains('[44')) 'directories are no longer listed on a blue background' (Show $PSStyle.FileInfo.Directory)
+        } else {
+            $raw = $null
+            try { $raw = @($Host.UI.RawUI.ForegroundColor, $Host.UI.RawUI.BackgroundColor) } catch { }
+            if ($raw) {
+                Check (($Host.PrivateData.ProgressForegroundColor -eq $raw[0]) -and ($Host.PrivateData.ProgressBackgroundColor -eq $raw[1])) 'the progress bar has the colours of the console' "$($Host.PrivateData.ProgressForegroundColor) on $($Host.PrivateData.ProgressBackgroundColor), console $($raw[0]) on $($raw[1])"
+            } else { Skip 'the progress bar colours: this process has no console to read the colours from' }
+        }
+
+        # R27: the comfort set, in a profile session with keys=profile.
+        Check (([string]$options.BellStyle -eq 'None') -and $options.HistoryNoDuplicates -and $options.HistorySearchCursorMovesToEnd) 'comfort set: no bell, no duplicates in history, cursor at the end after a search'
+        $handlers = @{}
+        Get-PSReadLineKeyHandler | Where-Object { $_.Key -in 'Tab', 'UpArrow', 'DownArrow' } | ForEach-Object { $handlers[[string]$_.Key] = [string]$_.Function }
+        CheckEqual ("{0} {1} {2}" -f $handlers['Tab'], $handlers['UpArrow'], $handlers['DownArrow']) 'MenuComplete HistorySearchBackward HistorySearchForward' 'comfort set: Tab, UpArrow and DownArrow'
+        if ($null -eq $predictionBefore) { Check (-not $options.PSObject.Properties['PredictionSource']) 'this PSReadLine has no PredictionSource, and init.ps1 did not try to set it' }
+        elseif ($predictionBefore -eq 'None') { CheckEqual ([string]$options.PredictionSource) 'History' 'comfort set: PredictionSource was None and is History' }
+        else { CheckEqual ([string]$options.PredictionSource) $predictionBefore 'comfort set: a PredictionSource that was not None is left alone' }
+
+        # R26 and R30: the first prompt paints, and carries the marks.
+        $here = (Get-Location).ProviderPath
+        $shown = '~' + $T.Sep + 'work'
+        $startMarks = $E + ']133;A' + $BEL + $E + ']9;9;"' + $here + '"' + $BEL
+        $endMark = $E + ']133;B' + $BEL
+        $run = Capture { prompt }
+        CheckEqual $run.Console (Palette 'dark') 'the first prompt writes PALETTE of the resolved variant to the console'
+        CheckEqual $run.Text ($startMarks + (Plain $shown) + $endMark) 'the first prompt: marks, path with ~, green >'
+        Check ($run.Output.Count -eq 1 -and $run.Output[0] -is [string]) 'the prompt returns one string'
+        $run = Capture { prompt }
+        CheckEqual $run.Console '' 'the second prompt writes nothing: the variant did not change'
+        CheckEqual $run.Text ($E + ']133;D;0' + $BEL + $startMarks + (Plain $shown) + $endMark) 'from the second prompt on the end-of-command mark comes first'
+
+        # $? and $LASTEXITCODE.
+        $run = Capture { Write-Error 'failed on purpose' -ErrorAction SilentlyContinue; prompt }
+        CheckEqual $run.Text ($E + ']133;D;7' + $BEL + $startMarks + (Plain $shown -ok $false) + $endMark) 'after a failed command: red >, and the exit code of the last program in the mark'
+        $global:LASTEXITCODE = 0
+        $run = Capture { Write-Error 'failed on purpose' -ErrorAction SilentlyContinue; prompt }
+        CheckEqual $run.Text ($E + ']133;D;1' + $BEL + $startMarks + (Plain $shown -ok $false) + $endMark) 'after a failed command without an exit code the mark says 1'
+        $global:LASTEXITCODE = 3
+        $run = Capture { $null = 1; prompt }
+        CheckEqual $run.Text ($E + ']133;D;0' + $BEL + $startMarks + (Plain $shown) + $endMark) 'after a successful command the mark says 0 whatever $LASTEXITCODE holds'
+        Check ($global:LASTEXITCODE -eq 3) 'the prompt leaves $LASTEXITCODE alone'
+        $Error.Clear()
+
+        # R30: following the system, one variant after the other.
+        foreach ($step in 'light', 'hc', 'hc-light', 'dark') {
+            $env:SERENO_OS_MODE = $step
+            $run = Capture { prompt }
+            CheckEqual $run.Console (Palette $step) "the system turns $step`: the next prompt writes PALETTE of $step"
+            $run = Capture { prompt }
+            CheckEqual $run.Console '' "the system stays $step`: nothing is written"
+        }
+
+        # R30: the mode file is read again when it changes.
+        Set-Mode (Mode 'light' 'vivid')
+        CheckEqual (Capture { prompt }).Console (Palette 'light-vivid') 'the mode file now says light and vivid: the next prompt paints light-vivid'
+        Set-Mode (Mode 'hc' 'vivid')
+        CheckEqual (Capture { prompt }).Console (Palette 'hc') 'the mode file now says hc: the flavour does not matter'
+        Set-Mode (Mode 'auto' 'vivid')
+        CheckEqual (Capture { prompt }).Console (Palette 'dark-vivid') 'back to auto with vivid: dark-vivid, because the system is dark'
+        Set-Mode (Mode 'auto' 'soft' 'off')
+        CheckEqual (Capture { prompt }).Console (Palette 'reset') 'inband=off: the palette this session painted is handed back with RESET'
+        CheckEqual (Capture { prompt }).Console '' 'inband=off: after that nothing is written'
+        Set-Mode (Mode 'auto' 'soft' 'always')
+        CheckEqual (Capture { prompt }).Console (Palette 'dark') 'inband=always: painted again'
+        Set-Mode ("mode=auto`r`nflavor=vivid`r`ninband=profile`r`nkeys=profile`r`nprompt=on`r`n")
+        CheckEqual (Capture { prompt }).Console '' 'a malformed mode file (CRLF) means the defaults: auto and soft, which is what is painted already'
+        Set-Mode (Mode 'light')
+        CheckEqual (Capture { prompt }).Console (Palette 'light') 'a valid file again: light'
+        Remove-Item -LiteralPath $T.ModeFile -Force
+        CheckEqual (Capture { prompt }).Console (Palette 'dark') 'a missing mode file means the defaults: auto, so dark'
+        Set-Mode (Mode)
+
+        # R26: the branch, read without git (PATH is an empty folder here).
+        CheckEqual $env:PATH (Join-Path $T.Tmp 'empty-path') 'PATH is an empty folder in this session'
+        $cases = [ordered]@{
+            'repo' = 'feature/x'; 'repo/sub/deep' = 'feature/x'; 'detached' = '0123456'; 'crlf' = 'main'; 'worktree' = 'side'; 'repo/broken' = 'feature/x'; 'hostile' = 'a]0;xb'
+        }
+        foreach ($case in $cases.Keys) {
+            Go $case
+            $relative = '~' + $T.Sep + $case.Replace('/', $T.Sep)
+            $marks = $E + ']133;D;0' + $BEL + $E + ']133;A' + $BEL + $E + ']9;9;"' + (Get-Location).ProviderPath + '"' + $BEL
+            CheckEqual (Capture { prompt }).Text ($marks + (Plain $relative $cases[$case]) + $endMark) "branch in ~/$case is $($cases[$case])"
+        }
+        Go 'work'
+
+        # R26: how long the last command took.
+        $t0 = [datetime]'2026-01-01T10:00:00'
+        $history = { param([double]$seconds) [pscustomobject]@{ CommandLine = 'wait'; ExecutionStatus = 'Completed'; StartExecutionTime = $t0; EndExecutionTime = $t0.AddSeconds($seconds) } | Add-History }
+        $marks = $E + ']133;D;0' + $BEL + $startMarks
+        & $history 2.34
+        $culture = [Threading.Thread]::CurrentThread.CurrentCulture
+        [Threading.Thread]::CurrentThread.CurrentCulture = [Globalization.CultureInfo]::GetCultureInfo('de-DE')
+        try { $run = Capture { prompt } } finally { [Threading.Thread]::CurrentThread.CurrentCulture = $culture }
+        CheckEqual $run.Text ($marks + (Plain $shown '' '2.3s') + $endMark) 'a command of 2.34 s shows as 2.3s, with a point in every culture'
+        CheckEqual (Capture { prompt }).Text ($marks + (Plain $shown) + $endMark) 'the duration is shown once: Enter on an empty line does not repeat it'
+        & $history 1.99
+        CheckEqual (Capture { prompt }).Text ($marks + (Plain $shown) + $endMark) 'a command of 1.99 s shows no duration'
+        & $history 2.0
+        CheckEqual (Capture { prompt }).Text ($marks + (Plain $shown '' '2.0s') + $endMark) 'a command of exactly 2 s shows as 2.0s'
+        & $history 125.26
+        CheckEqual (Capture { prompt }).Text ($marks + (Plain $shown '' '125.3s') + $endMark) 'a long command stays in seconds: 125.3s'
+
+        # R26: nested prompts, other providers, the home folder.
+        $global:NestedPromptLevel = 2
+        CheckEqual (Capture { prompt }).Text ($marks + (Plain $shown -level 2) + $endMark) 'nested prompt level 2 shows >>>'
+        $global:NestedPromptLevel = 0
+        Set-Location Env:
+        CheckEqual (Capture { prompt }).Text ($E + ']133;D;0' + $BEL + $E + ']133;A' + $BEL + (Plain (Get-Location).Path) + $endMark) 'outside the file system: the location as it is, no working-directory mark, no branch'
+        Set-Location -LiteralPath $T.Home
+        $marksHome = $E + ']133;D;0' + $BEL + $E + ']133;A' + $BEL + $E + ']9;9;"' + (Get-Location).ProviderPath + '"' + $BEL
+        CheckEqual (Capture { prompt }).Text ($marksHome + (Plain '~') + $endMark) 'the home folder itself is ~'
+        $sibling = Join-Path $T.Tmp 'homex'
+        Set-Location -LiteralPath $sibling
+        $run = Capture { prompt }
+        Check ($run.Text.Contains($E + '[34m' + $sibling + $E + '[0m')) 'a folder that only starts like the home folder is not shortened' (Show $run.Text)
+        if ($T.Windows) {
+            Set-Location -LiteralPath (Join-Path $T.Home.ToUpper() 'work')
+            $run = Capture { prompt }
+            Check ($run.Text.Contains($E + '[34m~' + $T.Sep)) 'on Windows the home folder is recognised whatever its letter case' (Show $run.Text)
+        }
+        Go 'work'
+
+        # R23: sourcing twice is a no-op.
+        $state = $global:__sereno
+        $shownBefore = $state['Shown']
+        $promptText = $function:prompt.ToString()
+        $writer = New-Object System.IO.StringWriter
+        $output = $null; $after = $null; $before = $null
+        $before = @(Get-Variable | ForEach-Object { $_.Name })
+        [Console]::SetOut($writer)
+        try { $output = @(. $T.Init) } finally { [Console]::SetOut($console) }
+        $after = @(Get-Variable | ForEach-Object { $_.Name })
+        Check ([object]::ReferenceEquals($state, $global:__sereno) -and ($state['Shown'] -eq $shownBefore)) 'sourcing init.ps1 a second time keeps the state of the first'
+        CheckEqual $function:prompt.ToString() $promptText 'sourcing init.ps1 a second time keeps the prompt'
+        Check ($writer.ToString() -eq '' -and $output.Count -eq 0) 'sourcing init.ps1 a second time prints nothing'
+        CheckEqual (@($after | Where-Object { $before -notcontains $_ }) -join ',') '' 'sourcing init.ps1 a second time creates no variable'
+        Check (-not (Test-Path function:sereno)) 'no sereno function without ROOT/bin/sereno'
+        Check ($Error.Count -eq 0) 'nothing failed along the way' ($(if ($Error.Count) { [string]$Error[0] }))
+    }
+
+    # -----------------------------------------------------------------------
+    Invoke-Session 'resolution table' @{ } $defaultMode {
+        . $T.Init
+        $rows = @([IO.File]::ReadAllText($T.Modes).TrimEnd("`n").Split("`n"))
+        CheckEqual $rows[0] "mode`tflavor`thc_on`thc_light`tapps_light`tvariant" 'modes.tsv has the header the three implementations agree on'
+        $wrong = @(foreach ($row in $rows[1..($rows.Count - 1)]) {
+                $f = $row.Split("`t")
+                $got = & $global:__sereno['Resolve'] $f[0] $f[1] ($f[2] -eq '1') ($f[3] -eq '1') ($f[4] -eq '1')
+                if ($got -cne $f[5]) { "$row -> $got" }
+            })
+        Check ($rows.Count -eq 81 -and $wrong.Count -eq 0) 'init.ps1 resolves all 80 rows of testdata/modes.tsv' ($wrong -join '; ')
+        CheckEqual (& $global:__sereno['Resolve'] 'sepia' 'loud' $false $false $true) 'light' 'an unknown mode resolves like auto and an unknown flavour like soft'
+
+        $expected = [ordered]@{ 'dark' = 'False False False'; 'light' = 'False False True'; 'hc' = 'True False False'; 'hc-light' = 'True True False' }
+        foreach ($os in $expected.Keys) {
+            $env:SERENO_OS_MODE = $os
+            CheckEqual ((& $global:__sereno['Signals']) -join ' ') $expected[$os] "SERENO_OS_MODE=$os replaces the signals"
+        }
+        $env:SERENO_OS_MODE = 'sepia'
+        $signals = @(& $global:__sereno['Signals'])
+        Check ($signals.Count -eq 3 -and @($signals | Where-Object { $_ -isnot [bool] }).Count -eq 0) 'without a valid SERENO_OS_MODE the signals are read from the system (read only) and are three booleans'
+        if (-not $T.Windows) { CheckEqual ($signals -join ' ') 'False False False' 'outside Windows the signals are unknown and count as off' }
+
+        # The mode file: exactly five lines, anything else is the defaults.
+        $defaults = 'auto soft profile profile on'
+        $files = [ordered]@{
+            'a valid file' = @((Mode 'hc-light' 'vivid' 'always' 'off' 'off'), 'hc-light vivid always off off')
+            'CRLF line endings' = @("mode=dark`r`nflavor=soft`r`ninband=profile`r`nkeys=profile`r`nprompt=on`r`n", $defaults)
+            'no final newline' = @("mode=dark`nflavor=soft`ninband=profile`nkeys=profile`nprompt=on", $defaults)
+            'a sixth line' = @(((Mode 'dark') + "extra=1`n"), $defaults)
+            'an empty sixth line' = @(((Mode 'dark') + "`n"), $defaults)
+            'lines in another order' = @("flavor=soft`nmode=dark`ninband=profile`nkeys=profile`nprompt=on`n", $defaults)
+            'an unknown value' = @((Mode 'sepia'), $defaults)
+            'upper case' = @((Mode 'DARK'), $defaults)
+            'a space after the value' = @("mode=dark `nflavor=soft`ninband=profile`nkeys=profile`nprompt=on`n", $defaults)
+            'a carriage return in line 1' = @("mode=light`r`nflavor=vivid`ninband=always`nkeys=off`nprompt=off`n", $defaults)
+            'a carriage return in line 2' = @("mode=light`nflavor=vivid`r`ninband=always`nkeys=off`nprompt=off`n", $defaults)
+            'a carriage return in line 3' = @("mode=light`nflavor=vivid`ninband=always`r`nkeys=off`nprompt=off`n", $defaults)
+            'a carriage return in line 4' = @("mode=light`nflavor=vivid`ninband=always`nkeys=off`r`nprompt=off`n", $defaults)
+            'a carriage return in line 5' = @("mode=light`nflavor=vivid`ninband=always`nkeys=off`nprompt=off`r`n", $defaults)
+            'an empty file' = @('', $defaults)
+        }
+        foreach ($case in $files.Keys) {
+            [IO.File]::WriteAllText($T.ModeFile, $files[$case][0])
+            & $global:__sereno['Read']
+            CheckEqual ($global:__sereno['Settings'] -join ' ') $files[$case][1] "mode file with $case"
+        }
+        Remove-Item -LiteralPath $T.ModeFile -Force
+        & $global:__sereno['Read']
+        CheckEqual ($global:__sereno['Settings'] -join ' ') $defaults 'no mode file'
+
+        # R25: a background becomes the foreground of the same slot.
+        $fix = $global:__sereno['Foreground']
+        $samples = [ordered]@{
+            '[44;1m' = '[34;1m'; '[1;103m' = '[1;93m'; '[30;47m' = '[30;37m'; '[100m' = '[90m'; '[32;1m' = '[32;1m'; '[0m' = '[0m'; '[m' = '[m'
+            '[38;5;44m' = '[38;5;44m'; '[38;2;40;41;42m' = '[38;2;40;41;42m'; '[48;5;44;41m' = '[48;5;44;31m'; '[38;5;1;44m' = '[38;5;1;34m'
+        }
+        $wrong = @(foreach ($sample in $samples.Keys) { $got = & $fix ($E + $sample); if ($got -cne ($E + $samples[$sample])) { "$sample -> " + (Show $got) } })
+        Check ($wrong.Count -eq 0) 'background parameters 40-47 and 100-107 become foregrounds; colour arguments of 38 and 48 are left alone' ($wrong -join ', ')
+        CheckEqual (& $fix ($E + '[44;1m' + $E + '[41m')) ($E + '[34;1m' + $E + '[31m') 'every sequence of a value is fixed'
+        CheckEqual (& $fix 'plain') 'plain' 'a value without a sequence is left alone'
+    }
+
+    # -----------------------------------------------------------------------
+    Invoke-Session 'hook session in Windows Terminal' @{ WT_SESSION = 'test-session'; SERENO_OS_MODE = 'light' } $defaultMode {
+        $before = Get-PSReadLineOption
+        $bell = [string]$before.BellStyle; $moves = $before.HistorySearchCursorMovesToEnd
+        $tab = [string](Get-PSReadLineKeyHandler | Where-Object { $_.Key -eq 'Tab' } | Select-Object -First 1).Function
+        . $T.Init
+        $options = Get-PSReadLineOption
+        CheckEqual ([string]$options.CommandColor) ($E + '[34m') 'a hook session gets the colours of the line editor too'
+        Check (([string]$options.BellStyle -eq $bell) -and ($options.HistorySearchCursorMovesToEnd -eq $moves)) 'keys=profile outside the Serena profile: the options of the comfort set are untouched'
+        CheckEqual ([string](Get-PSReadLineKeyHandler | Where-Object { $_.Key -eq 'Tab' } | Select-Object -First 1).Function) $tab 'keys=profile outside the Serena profile: Tab is untouched'
+        $run = Capture { prompt; prompt }
+        CheckEqual $run.Console '' 'inband=profile outside the Serena profile: nothing is painted'
+        Check ($run.Output[0].StartsWith($E + ']133;A' + $BEL) -and $run.Output[1].StartsWith($E + ']133;D;0' + $BEL)) 'the prompt carries the marks in any Windows Terminal session'
+        Set-Mode (Mode 'auto' 'soft' 'always')
+        CheckEqual (Capture { prompt }).Console (Palette 'light') 'the mode file turns to inband=always: this session paints from the next prompt on'
+    }
+
+    Invoke-Session 'session outside Windows Terminal' @{ SERENO_SESSION = 'wt-profile'; SERENO_OS_MODE = 'light' } $defaultMode {
+        . $T.Init
+        Go 'repo'
+        $run = Capture { prompt; Write-Error 'failed on purpose' -ErrorAction SilentlyContinue; prompt }
+        CheckEqual $run.Console '' 'without WT_SESSION nothing is painted'
+        CheckEqual $run.Output[0] (Plain ('~' + $T.Sep + 'repo') 'feature/x') 'without WT_SESSION the prompt has no marks'
+        CheckEqual $run.Output[1] (Plain ('~' + $T.Sep + 'repo') 'feature/x' -ok $false) 'without WT_SESSION the failed prompt has no marks either'
+    }
+
+    Invoke-Session 'terminal of VS Code' @{ WT_SESSION = 'test-session'; SERENO_SESSION = 'wt-profile'; SERENO_OS_MODE = 'light'; TERM_PROGRAM = 'vscode' } $defaultMode {
+        . $T.Init
+        $run = Capture { prompt; prompt }
+        CheckEqual $run.Console '' 'TERM_PROGRAM=vscode: nothing is painted, Serena Theme owns the palette there'
+        CheckEqual $run.Output[1] (Plain ('~' + $T.Sep + 'work')) 'TERM_PROGRAM=vscode: the prompt has no marks'
+    }
+
+    Invoke-Session 'session recognised by WT_PROFILE_ID' @{ WT_SESSION = 'test-session'; WT_PROFILE_ID = '{6B2D8B49-31D3-5DEA-9087-93C26E1A033E}'; SERENO_OS_MODE = 'hc' } $defaultMode {
+        . $T.Init
+        CheckEqual (Capture { prompt }).Console (Palette 'hc') 'WT_PROFILE_ID with the GUID of the profile, in capitals, makes a Serena profile session'
+        CheckEqual ([string](Get-PSReadLineKeyHandler | Where-Object { $_.Key -eq 'Tab' } | Select-Object -First 1).Function) 'MenuComplete' 'and it gets the comfort set'
+    }
+
+    Invoke-Session 'another profile of Windows Terminal' @{ WT_SESSION = 'test-session'; WT_PROFILE_ID = '{61c54bbd-c2c6-5271-96e7-009a87ff44bf}'; SERENO_OS_MODE = 'hc' } $defaultMode {
+        . $T.Init
+        CheckEqual (Capture { prompt }).Console '' 'another WT_PROFILE_ID is not a Serena profile session'
+    }
+
+    Invoke-Session 'keys=always and inband=always' @{ WT_SESSION = 'test-session'; SERENO_OS_MODE = 'dark' } "mode=light`nflavor=vivid`ninband=always`nkeys=always`nprompt=on`n" {
+        . $T.Init
+        $options = Get-PSReadLineOption
+        Check (([string]$options.BellStyle -eq 'None') -and $options.HistorySearchCursorMovesToEnd) 'keys=always: the comfort set outside the Serena profile'
+        CheckEqual ([string](Get-PSReadLineKeyHandler | Where-Object { $_.Key -eq 'UpArrow' } | Select-Object -First 1).Function) 'HistorySearchBackward' 'keys=always: UpArrow searches the history'
+        CheckEqual (Capture { prompt }).Console (Palette 'light-vivid') 'inband=always with a fixed mode: light-vivid although the system is dark'
+    }
+
+    Invoke-Session 'keys=off and prompt=off' $profileSession "mode=auto`nflavor=soft`ninband=profile`nkeys=off`nprompt=off`n" {
+        $tab = [string](Get-PSReadLineKeyHandler | Where-Object { $_.Key -eq 'Tab' } | Select-Object -First 1).Function
+        $stockText = prompt
+        . $T.Init
+        CheckEqual ([string](Get-PSReadLineKeyHandler | Where-Object { $_.Key -eq 'Tab' } | Select-Object -First 1).Function) $tab 'keys=off: no comfort set even in the Serena profile'
+        CheckEqual ([string](Get-PSReadLineOption).CommandColor) ($E + '[34m') 'keys=off: the colours are set all the same'
+        $run = Capture { prompt }
+        CheckEqual $run.Text $stockText 'prompt=off: the stock prompt stays, and returns what it returned before'
+        CheckEqual $run.Console (Palette 'dark') 'prompt=off: the stock prompt is wrapped, so the session still follows the system'
+    }
+
+    Invoke-Session 'a prompt of the user in Windows Terminal' $profileSession $defaultMode {
+        function global:prompt { $status = $?; "[$status] mine> "; 'second object' }
+        $mine = $function:prompt
+        . $T.Init
+        Check ([object]::ReferenceEquals($global:__sereno['Saved'], $mine)) 'a prompt that is not the stock one is kept as it is'
+        $run = Capture { $null = 1; prompt }
+        CheckEqual $run.Console (Palette 'dark') 'the wrapped prompt follows the system'
+        Check ($run.Output.Count -eq 2 -and $run.Output[0] -ceq '[True] mine> ' -and $run.Output[1] -ceq 'second object') "the wrapper returns the user's output unchanged, object by object" (Show ($run.Output -join '|'))
+        $run = Capture { Write-Error 'failed on purpose' -ErrorAction SilentlyContinue; prompt }
+        CheckEqual $run.Output[0] '[False] mine> ' "the user's prompt still sees the `$? of the last command"
+        CheckEqual $run.Console '' 'and nothing is painted when the variant did not change'
+    }
+
+    Invoke-Session 'a prompt of the user outside Windows Terminal' @{ SERENO_SESSION = 'wt-profile' } $defaultMode {
+        function global:prompt { 'mine> ' }
+        $mine = $function:prompt
+        . $T.Init
+        Check ([object]::ReferenceEquals($function:prompt, $mine) -and ($null -eq $global:__sereno['Saved'])) "outside Windows Terminal the user's prompt is not even wrapped"
+        CheckEqual (prompt) 'mine> ' "and it answers as before"
+    }
+
+    Invoke-Session 'no PSReadLine' $profileSession $defaultMode {
+        Check (-not (Get-Module PSReadLine)) 'this session has no PSReadLine, like a script run or a session with a screen reader'
+        . $T.Init
+        Check (-not (Get-Module PSReadLine)) 'init.ps1 did not load PSReadLine'
+        Check ($Error.Count -eq 0) 'and nothing failed' ($(if ($Error.Count) { [string]$Error[0] }))
+        $run = Capture { prompt }
+        CheckEqual $run.Console (Palette 'dark') 'the prompt and the follow check work without PSReadLine'
+    } $false
+
+    Invoke-Session 'no mode file' $profileSession '<none>' {
+        . $T.Init
+        CheckEqual ($global:__sereno['Settings'] -join ' ') 'auto soft profile profile on' 'without a mode file the settings are those of a first apply'
+        CheckEqual (Capture { prompt }).Console (Palette 'dark') 'and the session follows the system'
+    }
+
+    Invoke-Session 'caller without strict mode' $profileSession $defaultMode {
+        Set-StrictMode -Off
+        $ErrorActionPreference = 'Continue'
+        $run = Capture { . $T.Init }
+        Check ($run.Console -eq '' -and $run.Output.Count -eq 0 -and $Error.Count -eq 0) 'init.ps1 is as quiet for a caller without strict mode'
+        CheckEqual ([string]$ErrorActionPreference) 'Continue' 'and leaves its $ErrorActionPreference alone'
+        Check ((Capture { prompt }).Text.Contains($E + '[32m>')) 'and the prompt works'
+    }
+
+    if (-not (Test-Path variable:PSStyle)) {
+        Invoke-Session 'PowerShell with $PSStyle (simulated)' @{ SERENO_OS_MODE = 'dark' } $defaultMode {
+            # Windows PowerShell has no $PSStyle. An object of the same
+            # shape lets the rule of R25 for PowerShell 7 run here too.
+            $extension = New-Object 'System.Collections.Generic.Dictionary[string,string]'
+            $extension['.zip'] = $E + '[31;1m'; $extension['.odd'] = $E + '[41;97m'
+            $global:PSStyle = [pscustomobject]@{
+                Progress = [pscustomobject]@{ Style = $E + '[33;1m'; MaxWidth = 120 }
+                Formatting = [pscustomobject]@{ FormatAccent = $E + '[32;1m'; TableHeader = $E + '[102;30m'; Error = $E + '[31;1m'; Odd = 7 }
+                FileInfo = [pscustomobject]@{ Directory = $E + '[44;1m'; SymbolicLink = $E + '[36;1m'; Executable = $E + '[32;1m'; Extension = $extension }
+            }
+            $progress = "$($Host.PrivateData.ProgressForegroundColor) $($Host.PrivateData.ProgressBackgroundColor)"
+            . $T.Init
+            CheckEqual $PSStyle.FileInfo.Directory ($E + '[34;1m') 'FileInfo.Directory loses its blue background and becomes blue text'
+            CheckEqual $PSStyle.Formatting.TableHeader ($E + '[92;30m') 'every Formatting value is looked at'
+            CheckEqual $PSStyle.FileInfo.Extension['.odd'] ($E + '[31;97m') 'every FileInfo.Extension entry is looked at'
+            CheckEqual ($PSStyle.Progress.Style + $PSStyle.Formatting.FormatAccent + $PSStyle.Formatting.Error + $PSStyle.FileInfo.SymbolicLink + $PSStyle.FileInfo.Executable + $PSStyle.FileInfo.Extension['.zip']) ($E + '[33;1m' + $E + '[32;1m' + $E + '[31;1m' + $E + '[36;1m' + $E + '[32;1m' + $E + '[31;1m') 'values without a background are left as they are'
+            Check ($PSStyle.Formatting.Odd -eq 7 -and $PSStyle.Progress.MaxWidth -eq 120) 'members that are not styles are left alone'
+            CheckEqual "$($Host.PrivateData.ProgressForegroundColor) $($Host.PrivateData.ProgressBackgroundColor)" $progress 'where $PSStyle exists the host colours of the progress bar are not touched'
+            Check ($Error.Count -eq 0) 'and nothing failed' ($(if ($Error.Count) { [string]$Error[0] }))
+        }
+    }
+
+    # R34: the sereno function.
+    $binDir = Join-Path $root 'bin'
+    $null = New-Item -ItemType Directory -Path $binDir -Force
+    $binName = 'sereno'; if ($onWindows) { $binName = 'sereno.exe' }
+    [IO.File]::WriteAllText((Join-Path $binDir $binName), '')
+    Invoke-Session 'sereno in ROOT bin and not on PATH' @{ } $defaultMode {
+        . $T.Init
+        $name = 'sereno'; if ($T.Windows) { $name = 'sereno.exe' }
+        Check (Test-Path function:sereno) 'init.ps1 defines the function sereno'
+        CheckEqual $global:__sereno['Bin'] (Join-Path (Join-Path $T.Root 'bin') $name) 'and it calls the program in ROOT/bin'
+        CheckEqual ($function:sereno.ToString().Trim()) '& $global:__sereno[''Bin''] @args' 'with the arguments it was given'
+        CheckEqual $env:PATH (Join-Path $T.Tmp 'empty-path') 'PATH is not touched'
+    }
+    $pathDir = Join-Path $tmp 'on-path'
+    $null = New-Item -ItemType Directory -Path $pathDir -Force
+    $onPathName = 'sereno'; if ($onWindows) { $onPathName = 'sereno.cmd' }
+    [IO.File]::WriteAllText((Join-Path $pathDir $onPathName), '')
+    Invoke-Session 'sereno in ROOT bin and on PATH' @{ PATH = ($emptyPath + [IO.Path]::PathSeparator + $pathDir) } $defaultMode {
+        . $T.Init
+        Check (-not (Test-Path function:sereno)) 'a program called sereno is on PATH: init.ps1 defines no function'
+    }
+    Remove-Item -LiteralPath $binDir -Recurse -Force
+
+    # R21: the line `sereno apply --hook` puts into a profile, with ROOT in
+    # its default place.
+    Invoke-Session 'the hook line of R21' $profileSession "mode=auto`nflavor=vivid`ninband=profile`nkeys=profile`nprompt=on`n" {
+        $profileFile = Join-Path $T.Tmp 'profile.ps1'
+        [IO.File]::WriteAllText($profileFile, "`$mine = 1`r`n" + $env:SERENO_T_HOOK + "`r`n")
+        $writer = New-Object System.IO.StringWriter
+        $console = [Console]::Out
+        [Console]::SetOut($writer)
+        try { $output = @(. $profileFile) } finally { [Console]::SetOut($console) }
+        Check ($writer.ToString() -eq '' -and $output.Count -eq 0) 'the hook line of R21, in a profile, prints nothing'
+        Check ((Test-Path variable:global:__sereno) -and ($global:__sereno['Settings'][1] -ceq 'vivid')) 'and loads init.ps1 from ROOT in its default place'
+        CheckEqual (Capture { prompt }).Console (Palette 'dark-vivid') 'and the session behaves like any other'
+        Check ($Error.Count -eq 0) 'and nothing failed' ($(if ($Error.Count) { [string]$Error[0] }))
+    }
+
+    # R23: only the console host.
+    Invoke-Session 'a host that is not the console' @{ } $defaultMode {
+        $other = [powershell]::Create()
+        $null = $other.AddScript('. $args[0]; $Host.Name; [bool](Get-Variable -Name __sereno -Scope Global -ErrorAction SilentlyContinue); (Get-Command prompt).Definition.Contains("__sereno")').AddArgument($T.Init)
+        $answer = @($other.Invoke())
+        $other.Dispose()
+        Check ($answer.Count -eq 3 -and $answer[0] -ne 'ConsoleHost' -and $answer[1] -eq $false -and $answer[2] -eq $false) 'in a host that is not ConsoleHost init.ps1 returns at once' ($answer -join ', ')
+    }
+
+    # The Serena profile itself: -NoExit -File init.ps1, as the fragment starts
+    # it. With the input closed the host shows one prompt and ends.
+    if (-not $Only -or 'the command line of the Serena profile'.Contains($Only)) {
+        [Console]::Out.WriteLine('# session: the command line of the Serena profile')
+        [IO.File]::WriteAllText($modeFile, $defaultMode)
+        $arguments = '-NoLogo -NoProfile -NoExit -ExecutionPolicy Bypass -File "' + $initCopy + '"'
+        if (-not $onWindows) { $arguments = '-NoLogo -NoProfile -NoExit -File "' + $initCopy + '"' }
+        $work = Join-Path $userHome 'work'
+        $environment = @{ WT_SESSION = 'test-session'; SERENO_SESSION = 'wt-profile'; SERENO_OS_MODE = 'light' }
+        if (-not $onWindows) { $environment['PATH'] = $env:PATH }
+        $child = Start-Child $arguments $environment $work
+        $E = [string][char]27; $BEL = [string][char]7
+        $palette = [IO.File]::ReadAllText((Join-Path $Golden 'palette/light.bin'))
+        $shownPath = $work
+        if ($onWindows) { $shownPath = '~' + $sep + 'work' }
+        $prompt = $E + ']133;A' + $BEL + $E + ']9;9;"' + $work + '"' + $BEL + $E + '[34m' + $shownPath + $E + '[0m' + "`n" + $E + '[32m>' + $E + '[0m ' + $E + ']133;B' + $BEL
+        $show = { param($value) $value.Replace($E, '<ESC>').Replace($BEL, '<BEL>').Replace("`n", '<LF>').Replace("`r", '<CR>') }
+        Check ($child.Out.StartsWith($palette)) '-NoExit -File init.ps1: the first thing the session writes is PALETTE of the system''s variant' (& $show $child.Out.Substring(0, [Math]::Min(80, $child.Out.Length)))
+        if ($onWindows -and $PSVersionTable.PSVersion.Major -le 5) {
+            Check ($child.Out -ceq ($palette + $prompt)) '-NoExit -File init.ps1: then the Serena prompt, and nothing else' (& $show $child.Out.Substring([Math]::Min($palette.Length, $child.Out.Length)))
+        } else {
+            # PowerShell 7 does not take the home folder from the environment
+            # everywhere, so there only the shape of the prompt is compared.
+            Check ($child.Out.Contains($E + ']133;A' + $BEL) -and $child.Out.Contains($E + '[32m>' + $E + '[0m ' + $E + ']133;B' + $BEL)) '-NoExit -File init.ps1: then the Serena prompt' (& $show $child.Out)
+        }
+        Check ($child.Code -eq 0 -and $child.Err.Trim() -eq '') '-NoExit -File init.ps1: the session ends without an error when its input ends' ("exit code $($child.Code): " + $child.Err.Trim())
+    }
+} finally {
+    for ($i = 0; $i -lt 20; $i++) {
+        try { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction Stop; break } catch { Start-Sleep -Milliseconds 100 }
+    }
+}
+
+[Console]::Out.WriteLine("run.ps1: $($script:passed) passed, $($script:failed) failed, $($script:skipped) skipped ($(Split-Path -Leaf $exe) $($PSVersionTable.PSVersion))")
+if ($script:failed -gt 0) { exit 1 }
+exit 0
