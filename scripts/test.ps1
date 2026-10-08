@@ -12,17 +12,24 @@
 #      and the six builds with CGO_ENABLED=0 (-SkipGo and -SkipCross leave
 #      them out);
 #   3. a fresh rendering of everything sereno generates, in a temporary folder;
-#   4. the behaviour tests of the init files, each under the shell it is for:
+#   4. the program itself: sereno.exe is built into the temporary folder and
+#      scripts\smoke.ps1 runs it there, in a home of its own (apply --dry-run,
+#      apply, status --json, theme, check, export, hooks, uninstall, with the
+#      whole tree of that home compared before and after);
+#   5. the behaviour tests of the init files, each under the shell it is for:
 #      test\shell\run.ps1 under Windows PowerShell 5.1 and, when installed,
 #      under PowerShell 7; test\shell\run.bash under Git Bash; a shell that
-#      is not installed is reported as skipped, not as passed;
-#   5. with -Bench, the budgets of scripts\bench.ps1, which goes on to
+#      is not installed is reported as skipped, not as passed. They run on
+#      the rendered files, which step 4 has compared byte for byte with the
+#      ones `sereno apply` installs;
+#   6. with -Bench, the budgets of scripts\bench.ps1, which goes on to
 #      scripts\bench.sh for bash;
-#   6. the listings of step 1 again: any difference fails the run.
+#   7. the listings of step 1 again: any difference fails the run.
 #
-# The shells are started with -NoProfile (bash with --noprofile --norc) and
-# with a temporary folder as HOME, USERPROFILE, LOCALAPPDATA and APPDATA;
-# SERENO_SANDBOX confines every write of sereno's own code to that folder.
+# The program and the shells never see the real home: they are started with
+# a temporary folder as HOME, USERPROFILE, LOCALAPPDATA and APPDATA (the
+# shells with -NoProfile, bash with --noprofile --norc), and SERENO_SANDBOX
+# confines every write of sereno's own code to that folder.
 # No Windows setting is changed: dark, light and contrast themes are simulated
 # through SERENO_OS_MODE. The exit code is 1 when any step failed.
 #
@@ -81,10 +88,12 @@ $guarded = @(
     @('PSReadLine history', (Join-Path $realRoaming 'Microsoft\Windows\PowerShell\PSReadLine'), $true),
     @('.bashrc', (Join-Path $realHome '.bashrc'), $false),
     @('.bash_profile', (Join-Path $realHome '.bash_profile'), $false),
+    @('.bash_login', (Join-Path $realHome '.bash_login'), $false),
     @('.bash_history', (Join-Path $realHome '.bash_history'), $false),
     @('.profile', (Join-Path $realHome '.profile'), $false),
     @('.zshrc', (Join-Path $realHome '.zshrc'), $false),
-    @('%LOCALAPPDATA%\sereno', $realSereno, $true)
+    @('%LOCALAPPDATA%\sereno', $realSereno, $true),
+    @('%USERPROFILE%\.local\share\sereno', (Join-Path $realHome '.local\share\sereno'), $true)
 )
 function Get-Guard { $record = [ordered]@{}; foreach ($entry in $guarded) { $record[$entry[0]] = Get-Listing $entry[1] $entry[2] }; $record }
 
@@ -129,8 +138,25 @@ try {
     Invoke-Go 'everything sereno generates was rendered' @('run', './internal/tools/golden', '--out', $rendered) @{ SERENO_SANDBOX = $tmp }
     $initDir = Join-Path $rendered 'init'
 
+    $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+
     # -----------------------------------------------------------------------
-    # 4. The shells, with a temporary folder as their home.
+    # 4. The program, built into the temporary folder and run in a home of
+    #    its own. scripts\smoke.ps1 makes that home and points the program at
+    #    it before the first start.
+    Step 'sereno: the program is built into the temporary folder'
+    $sereno = Join-Path $tmp 'bin\sereno.exe'
+    Invoke-Go 'sereno.exe was built' @('build', '-trimpath', '-ldflags', '-X main.version=0.0.0-test', '-o', $sereno, './cmd/sereno')
+    Step 'sereno: smoke run in a temporary home'
+    if (Test-Path -LiteralPath $sereno) {
+        & $windowsPowerShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $repo 'scripts\smoke.ps1') -Sereno $sereno -Rendered $rendered -Version '0.0.0-test'
+        if ($LASTEXITCODE -ne 0) { Fail 'scripts\smoke.ps1' }
+    } else {
+        Fail 'scripts\smoke.ps1 did not run: there is no program to run'
+    }
+
+    # -----------------------------------------------------------------------
+    # 5. The shells, with a temporary folder as their home.
     $userHome = Join-Path $tmp 'home'
     foreach ($dir in $userHome, (Join-Path $userHome 'AppData\Local'), (Join-Path $userHome 'AppData\Roaming'), (Join-Path $userHome '.local\share'), (Join-Path $userHome 'Documents')) {
         $null = New-Item -ItemType Directory -Path $dir -Force
@@ -148,7 +174,6 @@ try {
     }
     foreach ($key in $testEnvironment.Keys) { $saved[$key] = [Environment]::GetEnvironmentVariable($key); [Environment]::SetEnvironmentVariable($key, $testEnvironment[$key]) }
 
-    $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $shells = @(, @('Windows PowerShell 5.1', $windowsPowerShell))
     $pwsh = Get-Command pwsh.exe -ErrorAction SilentlyContinue
     if ($pwsh) { $shells += , @('PowerShell 7', $pwsh.Source) }
@@ -185,7 +210,7 @@ try {
     Write-Host 'skip - zsh does not run on Windows without MSYS2: test\shell\run.zsh runs in CI on macOS and Linux'
 
     # -----------------------------------------------------------------------
-    # 5. Budgets.
+    # 6. Budgets.
     if ($Bench) {
         # bench.ps1 is started the way its header says and hands over to
         # scripts\bench.sh by itself: a hand-over that does not reach bash
@@ -202,7 +227,7 @@ try {
 }
 
 # ---------------------------------------------------------------------------
-# 6. The real places again.
+# 7. The real places again.
 
 Step 'guard: the real places after the run'
 $after = Get-Guard
@@ -210,7 +235,9 @@ foreach ($label in $before.Keys) {
     if ($before[$label] -ceq $after[$label]) { Write-Host "ok - unchanged: $label" }
     else { Fail "changed during the run: $label"; Write-Host "#   before: $(($before[$label] -split "`n")[0])"; Write-Host "#   after:  $(($after[$label] -split "`n")[0])" }
 }
-if (($before['%LOCALAPPDATA%\sereno'] -eq 'absent') -and ($after['%LOCALAPPDATA%\sereno'] -eq 'absent')) { Write-Host 'ok - %LOCALAPPDATA%\sereno was not created' }
+foreach ($label in '%LOCALAPPDATA%\sereno', '%USERPROFILE%\.local\share\sereno') {
+    if (($before[$label] -eq 'absent') -and ($after[$label] -eq 'absent')) { Write-Host "ok - $label was not created" }
+}
 
 Write-Host ''
 if ($script:failed) { Write-Host 'test.ps1: FAILED'; exit 1 }

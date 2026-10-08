@@ -8,16 +8,23 @@
 #      (shell rc files, the PowerShell profile folder, sereno's own folder);
 #   2. go vet and go test for the whole module (--skip-go leaves them out);
 #   3. a fresh rendering of everything sereno generates, in a temporary folder;
-#   4. the behaviour tests of the init files, each under the shell it is for:
+#   4. the program itself: sereno is built into the temporary folder and
+#      scripts/smoke.sh runs it there, in a home of its own (apply --dry-run,
+#      apply, status --json, theme, check, export, hooks, uninstall, with the
+#      whole tree of that home compared before and after);
+#   5. the behaviour tests of the init files, each under the shell it is for:
 #      test/shell/run.bash, test/shell/run.zsh when zsh is installed, and
 #      test/shell/run.ps1 when PowerShell 7 is installed. A shell that is not
-#      installed is reported as skipped, not as passed;
-#   5. with --bench, the budgets of scripts/bench.sh;
-#   6. the record of step 1 again: any difference fails the run.
+#      installed is reported as skipped, not as passed. They run on the
+#      rendered files, which step 4 has compared byte for byte with the ones
+#      `sereno apply` installs;
+#   6. with --bench, the budgets of scripts/bench.sh;
+#   7. the record of step 1 again: any difference fails the run.
 #
-# The shells are started without their startup files and with a temporary
-# folder as HOME; SERENO_SANDBOX confines every write of sereno's own code to
-# that folder. The exit code is 1 when any step failed.
+# The program and the shells never see the real home: they are started with
+# an empty environment and a temporary folder as HOME (the shells without
+# their startup files), and SERENO_SANDBOX confines every write of sereno's
+# own code to that folder. The exit code is 1 when any step failed.
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -71,6 +78,17 @@ if SERENO_SANDBOX=$tmp go run ./internal/tools/golden --out "$tmp/rendered"; the
     printf 'ok - everything sereno generates was rendered\n'
 else
     fail 'go run ./internal/tools/golden'
+fi
+
+# The program, built into the temporary folder and run in a home of its own.
+# scripts/smoke.sh makes that home and starts the program through `env -i`.
+step 'sereno: the program is built into the temporary folder'
+if go build -trimpath -ldflags '-X main.version=0.0.0-test' -o "$tmp/bin/sereno" ./cmd/sereno; then
+    printf 'ok - sereno was built\n'
+    step 'sereno: smoke run in a temporary home'
+    sh scripts/smoke.sh "$tmp/bin/sereno" --rendered "$tmp/rendered" --version 0.0.0-test || fail 'scripts/smoke.sh'
+else
+    fail 'go build ./cmd/sereno'
 fi
 
 # A shell under test starts from an empty environment: a temporary home, no
