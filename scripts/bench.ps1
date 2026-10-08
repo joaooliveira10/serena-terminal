@@ -29,8 +29,11 @@
 #
 # Budgets on the maintainer's machine: 80 ms (Serena profile session), 65 ms
 # (hook session) and 2 ms (prompt). When the variable CI is set, or with -Ci:
-# 150 ms, 150 ms and 10 ms. The exit code is 1 when a budget is not met or a
-# measurement could not be made.
+# 150 ms, 150 ms and 10 ms, except that a Serena profile session under
+# PowerShell 7 on Windows has 210 ms (R42 as amended after the first runs in
+# CI: on the hosted Windows runner PowerShell 7 takes 1.3 to 1.4 times as
+# long as Windows PowerShell 5.1 for the same file). The exit code is 1 when a
+# budget is not met or a measurement could not be made.
 #
 # The local budgets are judged on an idle machine: with other work running, a
 # median over 80 ms says nothing about init.ps1. Run this script again alone
@@ -63,7 +66,10 @@ $exe = (Get-Process -Id $PID).Path
 $onWindows = ($env:OS -eq 'Windows_NT')
 $loose = $Ci -or [bool]$env:CI
 $initBudget = [ordered]@{ 'Serena profile session' = 80.0; 'hook session' = 65.0 }; $promptBudget = 2.0
-if ($loose) { $initBudget = [ordered]@{ 'Serena profile session' = 150.0; 'hook session' = 150.0 }; $promptBudget = 10.0 }
+if ($loose) {
+    $initBudget = [ordered]@{ 'Serena profile session' = 150.0; 'hook session' = 150.0 }; $promptBudget = 10.0
+    if ($onWindows -and ($PSVersionTable.PSVersion.Major -ge 6)) { $initBudget['Serena profile session'] = 210.0 }
+}
 $failed = $false
 
 function Get-Median([double[]]$values) {
