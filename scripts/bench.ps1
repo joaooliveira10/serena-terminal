@@ -31,9 +31,9 @@
 # (hook session) and 2 ms (prompt). When the variable CI is set, or with -Ci:
 # 150 ms, 150 ms and 10 ms, except that PowerShell 7 on Windows has 210 ms
 # for both kinds of session (R42 as amended after the first runs in CI: on
-# the hosted Windows runner PowerShell 7 takes 1.3 to 1.6 times as long as
-# Windows PowerShell 5.1 for the same file). The exit code is 1 when a budget
-# is not met or a measurement could not be made.
+# the hosted Windows runners PowerShell 7 took about one and a half times as
+# long as Windows PowerShell 5.1 for the same file). The exit code is 1 when a
+# budget is not met or a measurement could not be made.
 #
 # The local budgets are judged on an idle machine: with other work running, a
 # median over 80 ms says nothing about init.ps1. Run this script again alone
