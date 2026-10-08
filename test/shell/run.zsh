@@ -89,7 +89,7 @@ trap 'rm -rf $tmp' EXIT
 home=$tmp/home
 empty=$tmp/empty-path
 root=$home/.local/share/sereno
-mkdir -p $home/work $empty $tmp/sessions $root/shell
+mkdir -p $home/work $empty $tmp/sessions $root/shell $tmp/folder-for-mode/mode
 cp $init $root/shell/init.zsh
 hook_line='[ -r "$HOME/.local/share/sereno/shell/init.zsh" ] && . "$HOME/.local/share/sereno/shell/init.zsh" # sereno:hook'
 default_mode='mode=auto\nflavor=soft\ninband=profile\nkeys=profile\nprompt=on\n'
@@ -294,6 +294,13 @@ for at in 1 2 3 4 5; do
     settings "a carriage return in line $at" $defaults
 done
 : > $T_ROOT/mode; settings 'an empty file' $defaults
+# R11: the file is ASCII. With a byte order mark in front, as an editor may
+# save it, it is malformed here as it is for sereno itself and in PowerShell.
+printf '\357\273\277mode=light\nflavor=vivid\ninband=always\nkeys=off\nprompt=off\n' > $T_ROOT/mode; settings 'a byte order mark' $defaults
+mode_file light vivid always off off; settings 'a valid file again' 'light vivid always off'
+# A folder where the file should be: the session would say so on standard
+# error if reading it made zsh complain, and that fails the session.
+__sereno_root=$T_TMP/folder-for-mode; settings 'a folder in its place' $defaults
 BODY
 
 for digit in 0 1 2 3 4 5 6 7; do
@@ -392,6 +399,9 @@ BODY
 }
 default_ls='di=1;34:ln=36:so=35:pi=33:ex=1;32:bd=1;33:cd=1;33:su=1;31:sg=1;33:tw=4;34:ow=4;34:st=4;34:or=31:mi=31'
 ls_case 'unset' - $default_ls
+# GNU ls uses its built-in table, backgrounds and all, for an LS_COLORS that
+# is set but empty, exactly as for one that is unset.
+ls_case 'empty' '' $default_ls
 ls_case 'the built-in table of GNU ls' \
     'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:' \
     'rs=0:di=01;34:ln=01;36:mh=00:pi=33:so=01;35:do=01;35:bd=1;33:cd=1;33:or=31:mi=00:su=1;31:sg=1;33:ca=31:tw=4;34:ow=4;34:st=4;34:ex=01;32:*.tar=01;31:'
@@ -402,6 +412,66 @@ zmodload zsh/parameter
 source_init
 check_eq "$LSCOLORS" 'exfxcxdxbxDxDxBxDxExEx' 'an unset LSCOLORS gets the table without backgrounds'
 check_eq "${parameters[LS_COLORS]}/${parameters[LSCOLORS]}" 'scalar-export/scalar-export' 'both are exported'
+BODY
+
+session 'ls colours: set but empty and not exported' <<'BODY'
+zmodload zsh/parameter
+unset LS_COLORS LSCOLORS
+LS_COLORS= LSCOLORS=
+source_init
+check_eq "$LS_COLORS" 'di=1;34:ln=36:so=35:pi=33:ex=1;32:bd=1;33:cd=1;33:su=1;31:sg=1;33:tw=4;34:ow=4;34:st=4;34:or=31:mi=31' 'an empty LS_COLORS counts as unset and gets the table of R33'
+check_eq "$LSCOLORS" 'exfxcxdxbxDxDxBxDxExEx' 'an empty LSCOLORS counts as unset and gets the table without backgrounds'
+check_eq "${parameters[LS_COLORS]}/${parameters[LSCOLORS]}" 'scalar-export/scalar-export' 'and both are exported'
+BODY
+
+# R23: a parameter of the user's that is read-only. An assignment would make
+# zsh print "read-only variable" and abandon what it was running.
+session 'a read-only PROMPT' $profile SERENO_OS_MODE=dark <<'BODY'
+PROMPT='theirs> '
+typeset -r PROMPT
+source_init
+slurp $T_TMP/out; out=$REPLY; slurp $T_TMP/err
+check_eq "$out$REPLY" '' 'a read-only PROMPT: init.zsh prints nothing'
+cd $T_HOME/repo
+hook; got=$REPLY; palette dark
+check_eq "$got" "$REPLY" 'the hook says nothing either, and the session follows the system'
+check_eq "$PROMPT/$__sereno_show" 'theirs> /' 'the prompt stays as it is, and setting it is not tried again'
+BODY
+
+session 'a read-only psvar' $profile SERENO_OS_MODE=dark <<'BODY'
+PROMPT='theirs> '
+typeset -r psvar
+source_init
+cd $T_HOME/repo
+hook; got=$REPLY; palette dark
+check_eq "$got" "$REPLY" 'a read-only psvar: the hook says nothing, and the session follows the system'
+check_eq "$PROMPT/$__sereno_show" 'theirs> /' 'the prompt stays as it is: without psvar it could not show the branch'
+BODY
+
+session 'a read-only precmd_functions' $profile SERENO_OS_MODE=dark <<'BODY'
+typeset -ga precmd_functions
+typeset -r precmd_functions
+source_init
+slurp $T_TMP/out; out=$REPLY; slurp $T_TMP/err
+check_eq "$out$REPLY" '' 'a read-only precmd_functions: init.zsh prints nothing'
+check_eq "${#precmd_functions}/$__sereno_show$__sereno_term/$LSCOLORS" '0//exfxcxdxbxDxDxBxDxExEx' 'no hook is installed or counted on, and the rest of the file ran'
+BODY
+
+session 'a read-only LS_COLORS' 'LS_COLORS=ow=34;42' <<'BODY'
+typeset -r LS_COLORS
+source_init
+slurp $T_TMP/out; out=$REPLY; slurp $T_TMP/err
+check_eq "$out$REPLY" '' 'a read-only LS_COLORS: init.zsh prints nothing'
+check_eq "$LS_COLORS/$LSCOLORS/${precmd_functions[-1]}" 'ow=34;42/exfxcxdxbxDxDxBxDxExEx/__sereno_precmd' 'it stays as it is, and the rest of the file ran'
+BODY
+
+session 'a read-only LS_COLORS and LSCOLORS without a value' <<'BODY'
+unset LS_COLORS LSCOLORS
+typeset -r LS_COLORS LSCOLORS
+source_init
+slurp $T_TMP/out; out=$REPLY; slurp $T_TMP/err
+check_eq "$out$REPLY" '' 'read-only LS_COLORS and LSCOLORS that are not set: init.zsh prints nothing'
+check_eq "$LS_COLORS/$LSCOLORS/${precmd_functions[-1]}" '//__sereno_precmd' 'they stay empty, and the rest of the file ran'
 BODY
 
 # A caller with options that change how zsh reads code: the functions of

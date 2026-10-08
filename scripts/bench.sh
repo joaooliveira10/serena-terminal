@@ -6,9 +6,12 @@
 #   bash scripts/bench.sh [--init DIR] [--runs N] [--calls N] [--ci]
 #
 # For each of bash and zsh it measures
-#   1. what sourcing the init file adds to the start of an interactive shell:
-#      the median of fresh shells that source it minus the median of fresh
-#      shells that do not;
+#   1. what sourcing the init file costs at the start of an interactive
+#      shell: the time around the sourcing, taken inside a fresh shell; the
+#      median of such shells. Printed below it and not judged: the median
+#      time of whole shells with and without the file. The difference of
+#      those two cannot decide a budget: starting a shell takes many times as
+#      long as the file and varies by more than the file costs;
 #   2. what the hook costs before one prompt with the follow check active
 #      (inside a repository, signals read from a stand-in registry): the mean
 #      of the given number of calls, made with PATH emptied, which they could
@@ -19,6 +22,7 @@
 #             init.ps1); default: render them from the sources with
 #             `go run ./internal/tools/golden`
 # --ci        hand the looser gates of CI to scripts/bench.ps1
+# --where     print the folder of the repository this file belongs to, and stop
 #
 # Everything runs from a temporary folder that is removed at the end. The
 # shells get an empty environment with that folder as HOME and no history
@@ -26,9 +30,13 @@
 
 set -u
 
-here=${BASH_SOURCE[0]%/*}
-[ "$here" = "${BASH_SOURCE[0]}" ] && here=.
-repo=$(cd "$here/.." && pwd)
+# The folder this file is in. On Windows the file may be named with
+# backslashes, as scripts/bench.ps1 could name it, and then %/* would cut
+# nothing off.
+here=${BASH_SOURCE[0]}
+case ${OSTYPE-} in msys*|cygwin*) here=${here//\\//} ;; esac
+case $here in */*) here=${here%/*} ;; *) here=. ;; esac
+repo=$(cd "$here/.." && pwd) || exit 2
 rendered=
 runs=9
 calls=200
@@ -39,6 +47,7 @@ while [ $# -gt 0 ]; do
         --runs) runs=$2; shift 2 ;;
         --calls) calls=$2; shift 2 ;;
         --ci) ci=1; shift ;;
+        --where) printf '%s\n' "$repo"; exit 0 ;;
         *) printf 'bench.sh: unknown argument %s\n' "$1" >&2; exit 2 ;;
     esac
 done
@@ -78,7 +87,7 @@ over() { awk -v a="$1" -v b="$2" 'BEGIN { exit !(a > b) }'; }
 # measure NAME SHELL FLAGS... : FLAGS start the shell without startup files
 # and interactive; the last argument of a call is the script to run.
 measure() {
-    local name=$1 shell=$2 init hook i with without added per total
+    local name=$1 shell=$2 init hook i inside with without added per total
     shift 2
     init=$root/shell/init.$name
     cp "$rendered/init.$name" "$init" || exit 1
@@ -86,6 +95,12 @@ measure() {
     [ "$name" = zsh ] && hook=__sereno_precmd
     printf ':\n' > "$tmp/without.$name"
     printf '. "%s"\n' "$init" > "$tmp/with.$name"
+    # The sourcing, timed inside the shell; the seconds go to standard error.
+    if [ "$name" = zsh ]; then
+        printf 'typeset -F SECONDS\nstart=$SECONDS\n. "%s"\nprintf "%%.3f\\n" $(( SECONDS - start )) >&2\n' "$init" > "$tmp/timed.$name"
+    else
+        printf 'TIMEFORMAT=%%3R\ntime { . "%s"; }\n' "$init" > "$tmp/timed.$name"
+    fi
     # The hook, timed inside the shell; the seconds go to standard error.
     # The first call paints and is left out. bash 3.2 has no clock finer
     # than a second except the one behind `time`; zsh has SECONDS.
@@ -117,25 +132,36 @@ EOF
             WT_SESSION=bench SERENO_SESSION=wt-profile SERENO_REG_ROOT="$registry" "$@" "$shell" "${flags[@]}" "$script" < /dev/null > /dev/null 2> "$tmp/stderr")
     }
     local flags=("$@")
-    : > "$tmp/with.times"; : > "$tmp/without.times"
+    : > "$tmp/with.times"; : > "$tmp/without.times"; : > "$tmp/inside.times"
     run "$tmp/with.$name"
     TIMEFORMAT=%3R
     i=0
     while [ "$i" -lt "$runs" ]; do
         { time run "$tmp/without.$name"; } 2>> "$tmp/without.times"
         { time run "$tmp/with.$name"; } 2>> "$tmp/with.times"
+        run "$tmp/timed.$name"
+        grep -E '^[0-9]+[.,][0-9]+$' "$tmp/stderr" | tail -n 1 >> "$tmp/inside.times"
         i=$((i + 1))
     done
+    if [ "$(wc -l < "$tmp/inside.times")" -ne "$runs" ]; then
+        printf 'init.%s: no time was reported for the sourcing\n' "$name"
+        cat "$tmp/stderr"
+        failed=1
+        return
+    fi
     # Some locales print a comma in the times.
+    inside=$(tr , . < "$tmp/inside.times" > "$tmp/t" && median "$tmp/t")
+    inside=$(awk -v a="$inside" 'BEGIN { printf "%.1f", a * 1000 }')
     with=$(tr , . < "$tmp/with.times" > "$tmp/t" && median "$tmp/t")
     without=$(tr , . < "$tmp/without.times" > "$tmp/t" && median "$tmp/t")
     added=$(awk -v a="$with" -v b="$without" 'BEGIN { printf "%.1f", (a - b) * 1000 }')
-    if over "$added" "$init_budget"; then
-        printf 'init.%s: adds %s ms (median of %s shells with %s s, without %s s)  OVER the budget of %s\n' "$name" "$added" "$runs" "$with" "$without" "$init_budget"
+    if over "$inside" "$init_budget"; then
+        printf 'init.%s: %s ms (median of %s shells, timed around the sourcing inside each)  OVER the budget of %s\n' "$name" "$inside" "$runs" "$init_budget"
         failed=1
     else
-        printf 'init.%s: adds %s ms (median of %s shells with %s s, without %s s)  ok, budget %s\n' "$name" "$added" "$runs" "$with" "$without" "$init_budget"
+        printf 'init.%s: %s ms (median of %s shells, timed around the sourcing inside each)  ok, budget %s\n' "$name" "$inside" "$runs" "$init_budget"
     fi
+    printf '    not judged: a whole shell, %s s with init.%s and %s s without (medians); the difference, %s ms, moves by more than init.%s costs\n' "$with" "$name" "$without" "$added" "$name"
 
     if ! run "$tmp/prompt.$name" PATH="$empty"; then
         printf 'init.%s: the hook failed with PATH emptied\n' "$name"

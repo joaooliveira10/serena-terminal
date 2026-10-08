@@ -87,7 +87,7 @@ Check ($commands.Count -gt 5 -and $strange.Count -eq 0) 'init.ps1 names no comma
 
 # The .NET types it touches: files, the registry (read), the console, text.
 $allowedTypes = 'bool', 'byte', 'char', 'Console', 'int', 'long', 'regex', 'ref', 'string', 'uint32',
-    'Microsoft.Win32.Registry', 'System.Globalization.CultureInfo', 'System.IO.Directory', 'System.IO.File', 'System.IO.Path', 'System.StringComparison'
+    'Microsoft.Win32.Registry', 'System.Globalization.CultureInfo', 'System.IO.Directory', 'System.IO.File', 'System.IO.Path', 'System.StringComparison', 'System.Text.Encoding'
 $types = @($ast.FindAll({ param($node) ($node -is [System.Management.Automation.Language.TypeExpressionAst]) -or ($node -is [System.Management.Automation.Language.ConvertExpressionAst]) -or ($node -is [System.Management.Automation.Language.TypeConstraintAst]) }, $true) |
         ForEach-Object { if ($_ -is [System.Management.Automation.Language.ConvertExpressionAst]) { $_.Type.TypeName.FullName } else { $_.TypeName.FullName } } | Sort-Object -Unique)
 $foreign = @($types | Where-Object { $allowedTypes -notcontains $_ })
@@ -150,6 +150,7 @@ $baseEnv = @{
     HOME = $userHome; USERPROFILE = $userHome
     LOCALAPPDATA = (Join-Path $userHome 'local'); APPDATA = (Join-Path $userHome 'roaming')
     XDG_DATA_HOME = $dataHome; HISTFILE = (Join-Path $userHome '.bash_history')
+    XDG_CACHE_HOME = (Join-Path $userHome '.cache'); XDG_CONFIG_HOME = (Join-Path $userHome '.config')
     SERENO_HOME = $root; SERENO_SANDBOX = $tmp; PATH = $emptyPath
     SERENO_OS_MODE = ''; SERENO_SESSION = ''; SERENO_REG_ROOT = ''; SERENO_LANG = ''
     WT_SESSION = ''; WT_PROFILE_ID = ''; TERM_PROGRAM = ''
@@ -169,7 +170,20 @@ function Start-Child([string]$arguments, [hashtable]$extraEnv, [string]$director
     $info.RedirectStandardError = $true
     $info.WorkingDirectory = $directory
     foreach ($pair in @($baseEnv.GetEnumerator()) + @($extraEnv.GetEnumerator())) { $info.EnvironmentVariables[$pair.Key] = [string]$pair.Value }
-    $process = [Diagnostics.Process]::Start($info)
+    # Windows PowerShell hands a child the preamble of [Console]::InputEncoding
+    # on its redirected input. In a console whose input code page is 65001
+    # that is a byte order mark, which a session that reads its commands from
+    # the input would take for a command. For the moment of the start the
+    # encoding is the same code page without a preamble.
+    $inputEncoding = $null
+    try {
+        if ([Console]::InputEncoding.GetPreamble().Length -gt 0) {
+            $inputEncoding = [Console]::InputEncoding
+            [Console]::InputEncoding = New-Object System.Text.UTF8Encoding $false
+        }
+    } catch { $inputEncoding = $null }
+    try { $process = [Diagnostics.Process]::Start($info) }
+    finally { if ($null -ne $inputEncoding) { [Console]::InputEncoding = $inputEncoding } }
     $process.StandardInput.Close()
     $errTask = $process.StandardError.ReadToEndAsync()
     $outTask = $process.StandardOutput.ReadToEndAsync()
@@ -505,15 +519,41 @@ try {
             'a carriage return in line 4' = @("mode=light`nflavor=vivid`ninband=always`nkeys=off`r`nprompt=off`n", $defaults)
             'a carriage return in line 5' = @("mode=light`nflavor=vivid`ninband=always`nkeys=off`nprompt=off`r`n", $defaults)
             'an empty file' = @('', $defaults)
+            'four lines' = @("mode=light`nflavor=vivid`ninband=always`nkeys=off`n", $defaults)
+            'an unknown flavour' = @((Mode 'light' 'loud'), $defaults)
+            'a space after the equals sign' = @("mode= light`nflavor=vivid`ninband=always`nkeys=off`nprompt=off`n", $defaults)
+            'a valid file again' = @((Mode 'light' 'vivid' 'always' 'off' 'off'), 'light vivid always off off')
         }
         foreach ($case in $files.Keys) {
             [IO.File]::WriteAllText($T.ModeFile, $files[$case][0])
             & $global:__sereno['Read']
             CheckEqual ($global:__sereno['Settings'] -join ' ') $files[$case][1] "mode file with $case"
         }
+        # R11: the file is ASCII. Saved by an editor with a byte order mark,
+        # or as UTF-16, it is malformed for sereno itself and for bash, which
+        # read its bytes; it must be malformed here too, or a PowerShell
+        # session would paint one variant while the others assume another.
+        $valid = Mode 'light' 'vivid' 'always' 'off' 'off'
+        $encodings = [ordered]@{
+            'UTF-8 with a byte order mark' = (New-Object System.Text.UTF8Encoding $true)
+            'UTF-16 with a byte order mark' = (New-Object System.Text.UnicodeEncoding $false, $true)
+            'UTF-16 big endian with a byte order mark' = (New-Object System.Text.UnicodeEncoding $true, $true)
+            'UTF-16 without a byte order mark' = (New-Object System.Text.UnicodeEncoding $false, $false)
+            'UTF-32 with a byte order mark' = (New-Object System.Text.UTF32Encoding $false, $true)
+        }
+        foreach ($case in $encodings.Keys) {
+            [IO.File]::WriteAllText($T.ModeFile, $valid, $encodings[$case])
+            & $global:__sereno['Read']
+            CheckEqual ($global:__sereno['Settings'] -join ' ') $defaults "mode file saved as $case"
+        }
         Remove-Item -LiteralPath $T.ModeFile -Force
         & $global:__sereno['Read']
         CheckEqual ($global:__sereno['Settings'] -join ' ') $defaults 'no mode file'
+        $null = New-Item -ItemType Directory -Path $T.ModeFile
+        & $global:__sereno['Read']
+        CheckEqual ($global:__sereno['Settings'] -join ' ') $defaults 'a folder where the mode file should be'
+        Remove-Item -LiteralPath $T.ModeFile -Force
+        Check ($Error.Count -eq 0) 'none of these files made init.ps1 fail' ($(if ($Error.Count) { [string]$Error[0] }))
 
         # R25: a background becomes the foreground of the same slot.
         $fix = $global:__sereno['Foreground']
@@ -626,6 +666,63 @@ try {
         CheckEqual (Capture { prompt }).Console (Palette 'dark') 'and the session follows the system'
     }
 
+    # R30: a changed mode file that cannot be read at one prompt (another
+    # program holds it at that moment) is read at the next one.
+    Invoke-Session 'mode file held by another program' $profileSession $defaultMode {
+        if (-not $T.Windows) { Skip 'files held by another program: only Windows keeps a reader out of a file for certain'; return }
+        . $T.Init
+        CheckEqual (Capture { prompt }).Console (Palette 'dark') 'the session starts on dark'
+        Set-Mode (Mode 'light' 'soft' 'always')
+        $lock = [IO.File]::Open($T.ModeFile, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        try { $held = Capture { prompt } } finally { $lock.Dispose() }
+        CheckEqual $held.Console '' 'while another program holds the changed mode file, the prompt paints nothing'
+        Check ($held.Text.Contains($E + '[32m>')) 'and the prompt itself is shown all the same' (Show $held.Text)
+        CheckEqual ($global:__sereno['Settings'] -join ' ') 'auto soft profile profile on' 'the settings read before stay in force meanwhile'
+        CheckEqual (Capture { prompt }).Console (Palette 'light') 'the first prompt after that reads the file and paints what it says'
+        CheckEqual ($global:__sereno['Settings'] -join ' ') 'light soft always profile on' 'and the settings are those of the file'
+        CheckEqual (Capture { prompt }).Console '' 'and nothing is written at the prompt after it'
+
+        # R26: the same for the file the branch is read from. With the
+        # preference of a careful profile, one failure would end the prompt.
+        Go 'repo'
+        $ErrorActionPreference = 'Stop'
+        $marks = $E + ']133;D;0' + $BEL + $E + ']133;A' + $BEL + $E + ']9;9;"' + (Get-Location).ProviderPath + '"' + $BEL
+        $endMark = $E + ']133;B' + $BEL
+        $shown = '~' + $T.Sep + 'repo'
+        CheckEqual (Capture { prompt }).Text ($marks + (Plain $shown 'feature/x') + $endMark) 'in a repository the prompt shows the branch'
+        $lock = [IO.File]::Open((Join-Path (Get-Location).ProviderPath '.git\HEAD'), [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        $held = $null; $failure = ''
+        try { $held = Capture { prompt } } catch { $failure = [string]$_ } finally { $lock.Dispose() }
+        Check ($failure -eq '') 'while another program holds HEAD the prompt does not fail' $failure
+        if ($held) { CheckEqual $held.Text ($marks + (Plain $shown) + $endMark) 'it is the prompt without the branch' }
+        CheckEqual (Capture { prompt }).Text ($marks + (Plain $shown 'feature/x') + $endMark) 'and the next prompt shows the branch again'
+    }
+
+    # R23: prints nothing, in any session. Where an application control
+    # policy puts PowerShell into ConstrainedLanguage mode, methods of .NET
+    # types cannot be called, which is what init.ps1 is made of; it must then
+    # leave the session alone instead of failing at every start and at every
+    # prompt. The mode is set for this child process only: no policy and no
+    # setting of the machine is involved. From that line on this script is
+    # constrained too, so it reports with plain strings.
+    Invoke-Session 'session in ConstrainedLanguage mode' $profileSession $defaultMode {
+        $ErrorActionPreference = 'Continue'
+        $stock = $function:prompt.ToString()
+        $shown = prompt
+        $errorsBefore = $Error.Count
+        $ExecutionContext.SessionState.LanguageMode = 'ConstrainedLanguage'
+        $output = @(. $T.Init)
+        if ([string]$ExecutionContext.SessionState.LanguageMode -ceq 'ConstrainedLanguage') { 'ok - the session is in ConstrainedLanguage mode' } else { 'not ok - the session is in ConstrainedLanguage mode' }
+        if ($Error.Count -eq $errorsBefore) { 'ok - in ConstrainedLanguage mode init.ps1 fails nowhere' } else { 'not ok - in ConstrainedLanguage mode init.ps1 fails nowhere'; '#   ' + ([string]$Error[0]).Replace("`n", ' ') }
+        if ($output.Count -eq 0) { 'ok - and returns nothing' } else { 'not ok - and returns nothing' }
+        if (-not (Test-Path variable:global:__sereno)) { 'ok - and keeps nothing for the session' } else { 'not ok - and keeps nothing for the session' }
+        if ($function:prompt.ToString() -ceq $stock) { 'ok - and leaves the prompt alone' } else { 'not ok - and leaves the prompt alone' }
+        $again = $null
+        try { $again = prompt } catch { $again = 'the prompt failed: ' + [string]$_ }
+        if ($again -ceq $shown) { 'ok - which still answers as before' } else { 'not ok - which still answers as before'; '#   ' + $again }
+        if (-not (Test-Path function:sereno)) { 'ok - and defines no function' } else { 'not ok - and defines no function' }
+    }
+
     Invoke-Session 'caller without strict mode' $profileSession $defaultMode {
         Set-StrictMode -Off
         $ErrorActionPreference = 'Continue'
@@ -731,6 +828,69 @@ try {
             Check ($child.Out.Contains($E + ']133;A' + $BEL) -and $child.Out.Contains($E + '[32m>' + $E + '[0m ' + $E + ']133;B' + $BEL)) '-NoExit -File init.ps1: then the Serena prompt' (& $show $child.Out)
         }
         Check ($child.Code -eq 0 -and $child.Err.Trim() -eq '') '-NoExit -File init.ps1: the session ends without an error when its input ends' ("exit code $($child.Code): " + $child.Err.Trim())
+    }
+
+    # The same start once more, with a file in front of init.ps1 that looks at
+    # the session before and after it. In a session started with -NoExit
+    # -File the host has loaded PSReadLine before the file runs, so the
+    # colours of R24 and the comfort set of R27 are there at the first prompt.
+    if ($onWindows -and (-not $Only -or 'the line editor in a session started from the Serena profile'.Contains($Only))) {
+        [Console]::Out.WriteLine('# session: the line editor in a session started from the Serena profile')
+        [IO.File]::WriteAllText($modeFile, $defaultMode)
+        $work = Join-Path $userHome 'work'
+        $report = Join-Path $tmp 'profile-report.txt'
+        $probe = Join-Path $sessionDir 'profile-probe.ps1'
+        [IO.File]::WriteAllText($probe, @'
+$loaded = [bool](Get-Module PSReadLine)
+if ($loaded) { Set-PSReadLineOption -HistorySaveStyle SaveNothing }
+. $env:SERENO_T_INIT
+$lines = @("loaded=$loaded")
+if ($loaded) {
+    $options = Get-PSReadLineOption
+    $lines += 'command=' + ([string]$options.CommandColor).Replace([string][char]27, 'ESC')
+    $lines += 'selection=' + ([string]$options.SelectionColor).Replace([string][char]27, 'ESC')
+    $lines += 'bell=' + $options.BellStyle
+    $lines += 'keys=' + ((Get-PSReadLineKeyHandler | Where-Object { $_.Key -in 'Tab', 'UpArrow', 'DownArrow' } | Sort-Object Key | ForEach-Object { $_.Key + ':' + $_.Function }) -join ',')
+}
+$lines += 'errors=' + $Error.Count
+[IO.File]::WriteAllLines($env:SERENO_T_REPORT, [string[]]$lines)
+'@)
+        $arguments = '-NoLogo -NoProfile -NoExit -ExecutionPolicy Bypass -File "' + $probe + '"'
+        $child = Start-Child $arguments @{ WT_SESSION = 'test-session'; SERENO_SESSION = 'wt-profile'; SERENO_OS_MODE = 'dark'; SERENO_T_REPORT = $report } $work
+        $found = ''
+        if (Test-Path -LiteralPath $report) { $found = (@([IO.File]::ReadAllLines($report)) -join '|') }
+        if ($found.StartsWith('loaded=False')) {
+            Report 'skip - the line editor in a session started from the Serena profile: the host loaded no PSReadLine here (a screen reader turns it off)'
+        } else {
+            Check ($found -ceq 'loaded=True|command=ESC[34m|selection=ESC[7m|bell=None|keys=DownArrow:HistorySearchForward,Tab:MenuComplete,UpArrow:HistorySearchBackward|errors=0') 'started with -NoExit -File, the session has PSReadLine before init.ps1 runs, and after it the colours of R24 and the comfort set of R27' $found
+        }
+        Check ($child.Code -eq 0 -and $child.Err.Trim() -eq '') 'and that session ends without an error when its input ends' ("exit code $($child.Code): " + $child.Err.Trim())
+    }
+
+    # R18: the same start from a ROOT that SERENO_HOME moved. The fragment
+    # then names init.ps1 by its absolute path between double quotes. Windows
+    # Terminal expands environment strings in the command line and hands it
+    # to the system as it is, and so does this test: a folder named with a
+    # space, an apostrophe, one percent sign or anything else a command line
+    # could stumble on must reach PowerShell as one path. (Two percent signs
+    # are refused when the fragment is rendered: between them Windows
+    # Terminal would look for a variable.)
+    if ($onWindows -and (-not $Only -or 'a moved ROOT in the command line of the Serena profile'.Contains($Only))) {
+        [Console]::Out.WriteLine('# session: a moved ROOT in the command line of the Serena profile')
+        $work = Join-Path $userHome 'work'
+        $palette = [IO.File]::ReadAllText((Join-Path $Golden 'palette/hc.bin'))
+        $mark = [string][char]27 + ']133;B' + [string][char]7
+        $names = @('plain', 'with space', "it's", '100% mine', 'a&b;c', '(d) [e] {f}', ('$g ' + [char]96 + 'h'), ',@i #j', '^k !l =m +n ~o', 'p -File q', ('letters ' + [char]0xE7 + [char]0xE3 + [char]0xE9))
+        foreach ($name in $names) {
+            $moved = Join-Path (Join-Path $tmp 'moved') $name
+            $null = [IO.Directory]::CreateDirectory((Join-Path $moved 'shell'))
+            [IO.File]::Copy($Init, (Join-Path $moved 'shell\init.ps1'))
+            [IO.File]::WriteAllText((Join-Path $moved 'mode'), $defaultMode)
+            $arguments = '-NoLogo -NoProfile -NoExit -ExecutionPolicy Bypass -File "' + $moved + '\shell\init.ps1"'
+            $child = Start-Child ([Environment]::ExpandEnvironmentVariables($arguments)) @{ WT_SESSION = 'test-session'; SERENO_SESSION = 'wt-profile'; SERENO_OS_MODE = 'hc'; SERENO_HOME = $moved } $work
+            $shown = $name -replace '[^ -~]', '?'
+            Check ($child.Out.StartsWith($palette) -and $child.Out.EndsWith($mark) -and $child.Code -eq 0 -and $child.Err.Trim() -eq '') "ROOT in a folder named <$shown>: the session starts, paints and shows the Serena prompt" ("exit code $($child.Code): " + $child.Err.Trim())
+        }
     }
 } finally {
     for ($i = 0; $i -lt 20; $i++) {

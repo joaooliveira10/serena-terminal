@@ -19,15 +19,23 @@ typeset -g __sereno_root="${${(%):-%x}:A:h:h}"
 # substitution, no pipe, no program.
 
 # Reads ROOT/mode: five lines in a fixed order. A missing or malformed file
-# means the values of a first apply.
+# means the values of a first apply. Every file below is looked at before it
+# is read, and what the shell would say about one it cannot open after all is
+# sent away first: a redirection from a folder, or from a file that another
+# program holds at that moment, must not put a message on the screen.
 __sereno_settings() {
-    local a= b= c= d= f= x=
+    local a= b= c= d= f= x= opened=
+    if [ -f "$__sereno_root/mode" ] && [ -r "$__sereno_root/mode" ]; then
+        {
+            opened=1
+            IFS= read -r a && IFS= read -r b && IFS= read -r c && IFS= read -r d && IFS= read -r f || a=
+            if IFS= read -r x || [ -n "$x" ]; then a=; fi
+        } 2> /dev/null < "$__sereno_root/mode" || :
+        # There, readable, and still not opened: held by another program.
+        # The settings read before stay, and the next prompt reads again.
+        if [ -z "$opened" ] && [ -n "${__sereno_mode-}" ]; then return 0; fi
+    fi
     __sereno_mode=auto __sereno_flavor=soft __sereno_inband=profile __sereno_prompt_on=on
-    [ -r "$__sereno_root/mode" ] || return 0
-    {
-        IFS= read -r a && IFS= read -r b && IFS= read -r c && IFS= read -r d && IFS= read -r f || return 0
-        if IFS= read -r x || [ -n "$x" ]; then return 0; fi
-    } < "$__sereno_root/mode"
     case $a in mode=auto|mode=dark|mode=light|mode=hc|mode=hc-light) ;; *) return 0 ;; esac
     case $b in flavor=soft|flavor=vivid) ;; *) return 0 ;; esac
     case $c in inband=profile|inband=always|inband=off) ;; *) return 0 ;; esac
@@ -55,7 +63,7 @@ __sereno_signals() {
 
     # Flags is text, for example 126; bit 0 means a contrast theme is on.
     file=$__sereno_reg/'Control Panel/Accessibility/HighContrast/Flags'
-    if [ -r "$file" ]; then
+    if [ -f "$file" ] && [ -r "$file" ]; then
         IFS=$' \t' read -r r x < "$file" || :
         r=${r%$'\0'} x=${x%$'\0'}
         r=${r%$'\r'}
@@ -71,7 +79,7 @@ __sereno_signals() {
     # Window is "R G B" in decimal; the theme is a light one when
     # 0.2126 R + 0.7152 G + 0.0722 B is above 127.
     file=$__sereno_reg/'Control Panel/Colors/Window'
-    if [ -r "$file" ]; then
+    if [ -f "$file" ] && [ -r "$file" ]; then
         r= g= b= x=
         IFS=$' \t' read -r r g b x < "$file" || :
         r=${r%$'\0'} g=${g%$'\0'} b=${b%$'\0'} x=${x%$'\0'}
@@ -165,7 +173,7 @@ __sereno_find_branch() {
         if [ -d "$git" ]; then head=$git/HEAD; break; fi
         if [ -f "$git" ] && [ -r "$git" ]; then
             line=
-            IFS= read -r line < "$git" || :
+            IFS= read -r line 2> /dev/null < "$git" || :
             line=${line%$'\r'}
             case $line in
                 'gitdir: '*)
@@ -177,9 +185,9 @@ __sereno_find_branch() {
         [ -n "$dir" ] || break
         case $dir in */*) dir=${dir%/*} ;; *) dir= ;; esac
     done
-    if [ -z "$head" ] || [ ! -r "$head" ]; then return 0; fi
+    if [ -z "$head" ] || [ ! -f "$head" ] || [ ! -r "$head" ]; then return 0; fi
     line=
-    IFS= read -r line < "$head" || :
+    IFS= read -r line 2> /dev/null < "$head" || :
     line=${line%$'\r'}
     case $line in
         'ref: refs/heads/'*) __sereno_branch=${line#ref: refs/heads/} ;;
@@ -230,12 +238,14 @@ __sereno_ls_value() {
 
 # Colours of ls. GNU ls paints some file types as a foreground slot on a
 # background slot, which cannot be read on any Serena variant; these settings
-# use foregrounds only. Nothing else about ls is touched.
+# use foregrounds only. Nothing else about ls is touched. A variable that is
+# set but empty counts as unset, because that is how ls takes it: it then
+# uses its built-in table, backgrounds and all. The variables are set through
+# __sereno_set, which says nothing when one of them is read-only.
 __sereno_ls_colors() {
     local rest= out= sep= entry= key= val=
-    if [ -z "${LS_COLORS+x}" ]; then
-        LS_COLORS='di=1;34:ln=36:so=35:pi=33:ex=1;32:bd=1;33:cd=1;33:su=1;31:sg=1;33:tw=4;34:ow=4;34:st=4;34:or=31:mi=31'
-        export LS_COLORS
+    if [ -z "${LS_COLORS-}" ]; then
+        __sereno_set LS_COLORS 'di=1;34:ln=36:so=35:pi=33:ex=1;32:bd=1;33:cd=1;33:su=1;31:sg=1;33:tw=4;34:ow=4;34:st=4;34:or=31:mi=31' && export LS_COLORS
     else
         rest=$LS_COLORS
         while :; do
@@ -252,11 +262,10 @@ __sereno_ls_colors() {
             out=$out$sep$entry sep=:
             case $rest in *:*) rest=${rest#*:} ;; *) break ;; esac
         done
-        if [ "$out" != "$LS_COLORS" ]; then LS_COLORS=$out; fi
+        if [ "$out" != "$LS_COLORS" ]; then __sereno_set LS_COLORS "$out" || :; fi
     fi
-    if [ -z "${LSCOLORS+x}" ]; then
-        LSCOLORS=exfxcxdxbxDxDxBxDxExEx
-        export LSCOLORS
+    if [ -z "${LSCOLORS-}" ]; then
+        __sereno_set LSCOLORS exfxcxdxbxDxDxBxDxExEx && export LSCOLORS
     fi
     return 0
 }
@@ -268,10 +277,19 @@ __sereno_byte() {
     setopt no_multibyte
     local b=
     __sereno_reply=0
-    [[ -r $1 ]] || return 0
+    [[ -f $1 && -r $1 ]] || return 0
     read -r -k 1 -u 0 b < "$1" || :
     if [[ -n $b ]] && (( #b != 0 )); then __sereno_reply=1; fi
     return 0
+}
+
+# Sets the variable $1 of the user to $2 and returns 1 when it cannot be set.
+# An assignment to a read-only variable makes zsh print an error and abandon
+# what it was running; the type of the variable is looked at first.
+__sereno_set() {
+    emulate -L zsh
+    [[ ${(Pt)1} == *readonly* ]] && return 1
+    typeset -g "$1=$2"
 }
 
 # Runs before every prompt. zsh keeps the exit status of the last command for
@@ -280,6 +298,12 @@ __sereno_precmd() {
     emulate -L zsh
     if [[ -n $__sereno_term ]]; then __sereno_follow; fi
     if [[ -n $__sereno_show ]]; then
+        # A PROMPT or psvar that is read-only keeps the prompt it has, for
+        # the session.
+        if [[ ${(t)PROMPT} == *readonly* || ${(t)psvar} == *readonly* ]]; then
+            __sereno_show=
+            return 0
+        fi
         __sereno_find_branch "$PWD"
         # The branch reaches the prompt through psvar, which is shown as
         # text: a branch called like a command substitution is not run.
@@ -309,9 +333,15 @@ __sereno_init() {
         __sereno_show=1
     fi
 
+    # A precmd_functions that is read-only cannot take the hook: the session
+    # then keeps its prompt and does not follow the system.
     if [[ -n $__sereno_show$__sereno_term ]]; then
-        typeset -ga precmd_functions
-        precmd_functions+=(__sereno_precmd)
+        if [[ ${(t)precmd_functions} == *readonly* ]]; then
+            __sereno_show= __sereno_term=
+        else
+            typeset -ga precmd_functions
+            precmd_functions+=(__sereno_precmd)
+        fi
     fi
 
     __sereno_ls_colors
@@ -326,4 +356,4 @@ __sereno_init() {
     return 0
 }
 __sereno_init
-unfunction __sereno_init __sereno_ls_colors __sereno_ls_value
+unfunction __sereno_init __sereno_ls_colors __sereno_ls_value __sereno_set

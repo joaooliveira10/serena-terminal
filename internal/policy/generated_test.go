@@ -139,6 +139,12 @@ func TestGeneratedShellFilesStartNoProcess(t *testing.T) {
 		"a change of the directory or of PATH":                `(^|[;{\s])(cd|pushd|popd)\s|(^|[\s;])PATH=|\bpath=\(`,
 		"a write to a file":                                   `>>|[^0-9&]>\s*[^\s&/]|>\s*/[^d]`,
 	}
+	// Redirections to /dev/null, the only ones there are: the look for sereno
+	// on PATH; the three files of the user's that are read before a prompt
+	// (the mode file, a .git file, HEAD), which another program may hold at
+	// that moment; and in init.bash the one place where a variable of the
+	// user is set, where a read-only one must not make bash speak.
+	silenced := map[string]int{"shell/init.bash": 5, "shell/init.zsh": 4}
 	for _, name := range []string{"shell/init.bash", "shell/init.zsh"} {
 		code := singleQuoted.ReplaceAllString(withoutComments(files[name]), "''")
 		for what, pattern := range shell {
@@ -146,8 +152,16 @@ func TestGeneratedShellFilesStartNoProcess(t *testing.T) {
 				t.Errorf("%s has %s: %q (R2)", name, what, found)
 			}
 		}
-		if n := strings.Count(code, "> /dev/null"); n != 1 {
-			t.Errorf("%s redirects to /dev/null %d times, want once (the look for sereno on PATH)", name, n)
+		if n := strings.Count(code, "> /dev/null"); n != silenced[name] {
+			t.Errorf("%s redirects to /dev/null %d times, want %d", name, n, silenced[name])
+		}
+		for _, read := range []string{`} 2> /dev/null < "$__sereno_root/mode" || :`, `IFS= read -r line 2> /dev/null < "$git" || :`, `IFS= read -r line 2> /dev/null < "$head" || :`} {
+			if !strings.Contains(code, read+"\n") {
+				t.Errorf("%s does not read quietly with: %s", name, read)
+			}
+		}
+		if name == "shell/init.bash" && !strings.Contains(code, "printf -v \"$1\" '' \"$2\" 2> /dev/null || failed=1\n") {
+			t.Errorf("%s: __sereno_set does not set a variable quietly", name)
 		}
 		if !strings.Contains(code, "export LS_COLORS\n") || !strings.Contains(code, "export LSCOLORS\n") || strings.Count(code, "export ") != 2 {
 			t.Errorf("%s must export LS_COLORS and LSCOLORS and nothing else (R33)", name)
@@ -168,6 +182,47 @@ func TestGeneratedShellFilesAreASCII(t *testing.T) {
 		}
 		if homePath.MatchString(text) || email.MatchString(text) {
 			t.Errorf("%s names a home folder or an address", name)
+		}
+	}
+}
+
+// TestScriptsReachBashByAnyPath keeps the two halves of one mistake apart:
+// PowerShell names files with backslashes, and a bash script that finds the
+// repository through its own name must cope with that. Where a PowerShell
+// script hands a shell script to bash, it turns the path around; and the
+// bash scripts do not rely on it.
+func TestScriptsReachBashByAnyPath(t *testing.T) {
+	root := testenv.RepoRoot(t)
+	read := func(name string) string {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	shellFile := regexp.MustCompile(`Join-Path[^)]*\.(sh|bash|zsh)'`)
+	handed := 0
+	for _, name := range []string{"scripts/test.ps1", "scripts/bench.ps1", "test/shell/run.ps1"} {
+		for number, line := range strings.Split(read(name), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "#") || !shellFile.MatchString(line) {
+				continue
+			}
+			handed++
+			if !strings.Contains(line, `.Replace('\', '/')`) && !strings.Contains(line, "& $posix ") {
+				t.Errorf("%s:%d names a shell script by a path with backslashes:\n  %s", name, number+1, strings.TrimSpace(line))
+			}
+		}
+	}
+	if handed < 2 {
+		t.Errorf("only %d lines found that hand a shell script to bash; the pattern of this test no longer matches the scripts", handed)
+	}
+	for _, name := range []string{"scripts/bench.sh", "test/shell/run.bash"} {
+		text := read(name)
+		if !strings.Contains(text, "here=${BASH_SOURCE[0]}\ncase ${OSTYPE-} in msys*|cygwin*) here=${here//\\\\//} ;; esac\ncase $here in */*) here=${here%/*} ;; *) here=. ;; esac\n") {
+			t.Errorf("%s does not find its folder in a way that survives a path with backslashes", name)
+		}
+		if !strings.Contains(text, `--where) printf '%s\n' "$repo"; exit 0 ;;`) {
+			t.Errorf("%s has no --where, which test/shell/run.bash uses to prove the above in a real bash", name)
 		}
 	}
 }

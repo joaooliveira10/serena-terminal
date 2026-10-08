@@ -16,6 +16,7 @@ package render
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -219,6 +220,13 @@ type fragmentData struct {
 	Schemes []fragmentScheme
 }
 
+// ErrRootInCommandLine is what CommandLine and Fragment report, wrapped, for a
+// ROOT that cannot be written into the command line of the Serena profile.
+// Nothing is wrong inside sereno then: the folder is one the profile cannot
+// name, which a command tells the user as a refusal (exit code 3) and not as
+// a failure. `--no-profile` and a ROOT in its default place do not meet it.
+var ErrRootInCommandLine = errors.New("the folder cannot be written into the command line of a Windows Terminal profile")
+
 // CommandLine returns the commandline value of the Serena profile (R18),
 // unescaped: the PowerShell, its fixed arguments and init.ps1 in quotes.
 func CommandLine(shell shells.Shell, root platform.Root) (string, error) {
@@ -237,7 +245,14 @@ func CommandLine(shell shells.Shell, root platform.Root) (string, error) {
 		// backslashes whatever system renders it.
 		init = strings.TrimRight(root.Path, `\/`) + initBelowRoot
 		if root.Path == "" || strings.ContainsAny(init, "\"\r\n") {
-			return "", fmt.Errorf("the folder %q cannot be written into a command line", root.Path)
+			return "", fmt.Errorf("%w: %q", ErrRootInCommandLine, root.Path)
+		}
+		// Windows Terminal expands %NAME% in a command line and has no way
+		// of writing a percent sign that stays one. Whether a NAME between
+		// two of them is a variable is only known on the machine, at the
+		// moment the profile starts; one sign alone can never be a name.
+		if strings.Count(init, "%") >= 2 {
+			return "", fmt.Errorf("%w: %q holds two percent signs, between which Windows Terminal would look for a variable", ErrRootInCommandLine, root.Path)
 		}
 	}
 	return program + profileArguments + `"` + init + `"`, nil

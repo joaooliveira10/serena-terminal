@@ -16,7 +16,8 @@
 #      test\shell\run.ps1 under Windows PowerShell 5.1 and, when installed,
 #      under PowerShell 7; test\shell\run.bash under Git Bash; a shell that
 #      is not installed is reported as skipped, not as passed;
-#   5. with -Bench, the budgets of scripts\bench.ps1;
+#   5. with -Bench, the budgets of scripts\bench.ps1, which goes on to
+#      scripts\bench.sh for bash;
 #   6. the listings of step 1 again: any difference fails the run.
 #
 # The shells are started with -NoProfile (bash with --noprofile --norc) and
@@ -186,13 +187,12 @@ try {
     # -----------------------------------------------------------------------
     # 5. Budgets.
     if ($Bench) {
+        # bench.ps1 is started the way its header says and hands over to
+        # scripts\bench.sh by itself: a hand-over that does not reach bash
+        # ends with an exit code that is not 0 and fails this step.
         Step 'budgets'
-        & $windowsPowerShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $repo 'scripts\bench.ps1') -Init (Join-Path $initDir 'init.ps1') -SkipBash
-        if ($LASTEXITCODE -ne 0) { Fail 'scripts\bench.ps1' }
-        if ($bash) {
-            & $bash --noprofile --norc (Join-Path $repo 'scripts\bench.sh').Replace('\', '/') --init $initDir.Replace('\', '/')
-            if ($LASTEXITCODE -ne 0) { Fail 'scripts\bench.sh' }
-        }
+        & $windowsPowerShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $repo 'scripts\bench.ps1') -Init (Join-Path $initDir 'init.ps1')
+        if ($LASTEXITCODE -ne 0) { Fail 'scripts\bench.ps1 (with scripts\bench.sh for bash)' } else { Write-Host 'ok - scripts\bench.ps1 (with scripts\bench.sh for bash)' }
     }
 } finally {
     foreach ($key in $saved.Keys) { [Environment]::SetEnvironmentVariable($key, $saved[$key]) }

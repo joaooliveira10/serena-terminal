@@ -24,15 +24,23 @@ __sereno_root=$__sereno_root/..
 # substitution, no pipe, no program.
 
 # Reads ROOT/mode: five lines in a fixed order. A missing or malformed file
-# means the values of a first apply.
+# means the values of a first apply. Every file below is looked at before it
+# is read, and what the shell would say about one it cannot open after all is
+# sent away first: a redirection from a folder, or from a file that another
+# program holds at that moment, must not put a message on the screen.
 __sereno_settings() {
-    local a= b= c= d= f= x=
+    local a= b= c= d= f= x= opened=
+    if [ -f "$__sereno_root/mode" ] && [ -r "$__sereno_root/mode" ]; then
+        {
+            opened=1
+            IFS= read -r a && IFS= read -r b && IFS= read -r c && IFS= read -r d && IFS= read -r f || a=
+            if IFS= read -r x || [ -n "$x" ]; then a=; fi
+        } 2> /dev/null < "$__sereno_root/mode" || :
+        # There, readable, and still not opened: held by another program.
+        # The settings read before stay, and the next prompt reads again.
+        if [ -z "$opened" ] && [ -n "${__sereno_mode-}" ]; then return 0; fi
+    fi
     __sereno_mode=auto __sereno_flavor=soft __sereno_inband=profile __sereno_prompt_on=on
-    [ -r "$__sereno_root/mode" ] || return 0
-    {
-        IFS= read -r a && IFS= read -r b && IFS= read -r c && IFS= read -r d && IFS= read -r f || return 0
-        if IFS= read -r x || [ -n "$x" ]; then return 0; fi
-    } < "$__sereno_root/mode"
     case $a in mode=auto|mode=dark|mode=light|mode=hc|mode=hc-light) ;; *) return 0 ;; esac
     case $b in flavor=soft|flavor=vivid) ;; *) return 0 ;; esac
     case $c in inband=profile|inband=always|inband=off) ;; *) return 0 ;; esac
@@ -60,7 +68,7 @@ __sereno_signals() {
 
     # Flags is text, for example 126; bit 0 means a contrast theme is on.
     file=$__sereno_reg/'Control Panel/Accessibility/HighContrast/Flags'
-    if [ -r "$file" ]; then
+    if [ -f "$file" ] && [ -r "$file" ]; then
         IFS=$' \t' read -r r x < "$file" || :
         r=${r%$'\0'} x=${x%$'\0'}
         r=${r%$'\r'}
@@ -76,7 +84,7 @@ __sereno_signals() {
     # Window is "R G B" in decimal; the theme is a light one when
     # 0.2126 R + 0.7152 G + 0.0722 B is above 127.
     file=$__sereno_reg/'Control Panel/Colors/Window'
-    if [ -r "$file" ]; then
+    if [ -f "$file" ] && [ -r "$file" ]; then
         r= g= b= x=
         IFS=$' \t' read -r r g b x < "$file" || :
         r=${r%$'\0'} g=${g%$'\0'} b=${b%$'\0'} x=${x%$'\0'}
@@ -170,7 +178,7 @@ __sereno_find_branch() {
         if [ -d "$git" ]; then head=$git/HEAD; break; fi
         if [ -f "$git" ] && [ -r "$git" ]; then
             line=
-            IFS= read -r line < "$git" || :
+            IFS= read -r line 2> /dev/null < "$git" || :
             line=${line%$'\r'}
             case $line in
                 'gitdir: '*)
@@ -182,9 +190,9 @@ __sereno_find_branch() {
         [ -n "$dir" ] || break
         case $dir in */*) dir=${dir%/*} ;; *) dir= ;; esac
     done
-    if [ -z "$head" ] || [ ! -r "$head" ]; then return 0; fi
+    if [ -z "$head" ] || [ ! -f "$head" ] || [ ! -r "$head" ]; then return 0; fi
     line=
-    IFS= read -r line < "$head" || :
+    IFS= read -r line 2> /dev/null < "$head" || :
     line=${line%$'\r'}
     case $line in
         'ref: refs/heads/'*) __sereno_branch=${line#ref: refs/heads/} ;;
@@ -235,12 +243,14 @@ __sereno_ls_value() {
 
 # Colours of ls. GNU ls paints some file types as a foreground slot on a
 # background slot, which cannot be read on any Serena variant; these settings
-# use foregrounds only. Nothing else about ls is touched.
+# use foregrounds only. Nothing else about ls is touched. A variable that is
+# set but empty counts as unset, because that is how ls takes it: it then
+# uses its built-in table, backgrounds and all. The variables are set through
+# __sereno_set, which says nothing when one of them is read-only.
 __sereno_ls_colors() {
     local rest= out= sep= entry= key= val=
-    if [ -z "${LS_COLORS+x}" ]; then
-        LS_COLORS='di=1;34:ln=36:so=35:pi=33:ex=1;32:bd=1;33:cd=1;33:su=1;31:sg=1;33:tw=4;34:ow=4;34:st=4;34:or=31:mi=31'
-        export LS_COLORS
+    if [ -z "${LS_COLORS-}" ]; then
+        __sereno_set LS_COLORS 'di=1;34:ln=36:so=35:pi=33:ex=1;32:bd=1;33:cd=1;33:su=1;31:sg=1;33:tw=4;34:ow=4;34:st=4;34:or=31:mi=31' && export LS_COLORS
     else
         rest=$LS_COLORS
         while :; do
@@ -257,11 +267,10 @@ __sereno_ls_colors() {
             out=$out$sep$entry sep=:
             case $rest in *:*) rest=${rest#*:} ;; *) break ;; esac
         done
-        if [ "$out" != "$LS_COLORS" ]; then LS_COLORS=$out; fi
+        if [ "$out" != "$LS_COLORS" ]; then __sereno_set LS_COLORS "$out" || :; fi
     fi
-    if [ -z "${LSCOLORS+x}" ]; then
-        LSCOLORS=exfxcxdxbxDxDxBxDxExEx
-        export LSCOLORS
+    if [ -z "${LSCOLORS-}" ]; then
+        __sereno_set LSCOLORS exfxcxdxbxDxDxBxDxExEx && export LSCOLORS
     fi
     return 0
 }
@@ -271,30 +280,47 @@ __sereno_ls_colors() {
 __sereno_byte() {
     local b=
     __sereno_reply=0
-    [ -r "$1" ] || return 0
+    if [ ! -f "$1" ] || [ ! -r "$1" ]; then return 0; fi
     LC_ALL=C IFS= read -r -d '' -n 1 b < "$1" || :
     if [ -n "$b" ]; then __sereno_reply=1; fi
     return 0
 }
 
+# Sets the variable $1 of the user to $2 and returns 1 when it cannot be set.
+# An assignment to a read-only variable makes bash print an error and abandon
+# the function that assigns, and whatever called it; printf only fails. In a
+# shell that runs with set -e even that failure would end the shell, wherever
+# it happens, so the option is put aside for the one command. Before bash 4.4
+# printf reports success all the same, so the value is looked at afterwards.
+__sereno_set() {
+    local failed=0 errexit=
+    case $- in *e*) errexit=1; set +e ;; esac
+    printf -v "$1" '%s' "$2" 2> /dev/null || failed=1
+    if [ -n "$errexit" ]; then set -e; fi
+    if [ "${!1-}" != "$2" ]; then failed=1; fi
+    return "$failed"
+}
+
 # Runs before every prompt, first in PROMPT_COMMAND. It keeps the exit status
 # of the last command for whatever runs after it.
 __sereno_prompt() {
-    local status=$?
+    local status=$? ps=
     if [ -n "$__sereno_term" ]; then __sereno_follow; fi
     if [ -n "$__sereno_show" ]; then
         __sereno_find_branch "$PWD"
         # PS1 names the variable; the branch is never pasted into it, so a
         # branch called like a command substitution is shown, not run.
-        PS1=$'\\[\033[34m\\]\\w\\[\033[0m\\]'
+        ps=$'\\[\033[34m\\]\\w\\[\033[0m\\]'
         if [ -n "$__sereno_branch" ] && shopt -q promptvars; then
-            PS1=$PS1$' \\[\033[35m\\]${__sereno_branch}\\[\033[0m\\]'
+            ps=$ps$' \\[\033[35m\\]${__sereno_branch}\\[\033[0m\\]'
         fi
         if [ "$status" -eq 0 ]; then
-            PS1=$PS1$'\\n\\[\033[32m\\]>\\[\033[0m\\] '
+            ps=$ps$'\\n\\[\033[32m\\]>\\[\033[0m\\] '
         else
-            PS1=$PS1$'\\n\\[\033[31m\\]>\\[\033[0m\\] '
+            ps=$ps$'\\n\\[\033[31m\\]>\\[\033[0m\\] '
         fi
+        # A PS1 that is read-only keeps the prompt it has, for the session.
+        __sereno_set PS1 "$ps" || __sereno_show=
     fi
     return "$status"
 }
@@ -318,16 +344,26 @@ __sereno_init() {
     fi
 
     # First in PROMPT_COMMAND, in front of whatever is there: a string, or
-    # an array where bash runs every element (5.1 and newer).
+    # an array where bash runs every element (5.1 and newer). A
+    # PROMPT_COMMAND that is read-only, as an audit setting of a shared
+    # machine makes it, cannot take the hook: the session then keeps its
+    # prompt and does not follow the system.
     if [ -n "$__sereno_show$__sereno_term" ]; then
         if [ -z "${PROMPT_COMMAND+x}" ]; then
-            PROMPT_COMMAND=__sereno_prompt
+            __sereno_set PROMPT_COMMAND __sereno_prompt || __sereno_show= __sereno_term=
         elif [ "${#PROMPT_COMMAND[@]}" -gt 1 ] && { [ "${BASH_VERSINFO[0]}" -gt 5 ] || { [ "${BASH_VERSINFO[0]}" -eq 5 ] && [ "${BASH_VERSINFO[1]}" -ge 1 ]; }; }; then
-            PROMPT_COMMAND=(__sereno_prompt "${PROMPT_COMMAND[@]}")
+            # An array is assigned as a whole, which printf cannot do. Its
+            # first element, written back to itself, tells whether the
+            # variable may be changed.
+            if __sereno_set PROMPT_COMMAND "$PROMPT_COMMAND"; then
+                PROMPT_COMMAND=(__sereno_prompt "${PROMPT_COMMAND[@]}")
+            else
+                __sereno_show= __sereno_term=
+            fi
         elif [ -n "$PROMPT_COMMAND" ]; then
-            PROMPT_COMMAND=__sereno_prompt$'\n'$PROMPT_COMMAND
+            __sereno_set PROMPT_COMMAND __sereno_prompt$'\n'"$PROMPT_COMMAND" || __sereno_show= __sereno_term=
         else
-            PROMPT_COMMAND=__sereno_prompt
+            __sereno_set PROMPT_COMMAND __sereno_prompt || __sereno_show= __sereno_term=
         fi
     fi
 

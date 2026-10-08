@@ -13,6 +13,10 @@
 # can wait is kept in script blocks that are compiled when they first run.
 
 if (-not ($Host.Name -ceq 'ConsoleHost')) { return }
+# Where an application control policy constrains the language of a session,
+# methods of .NET types cannot be called, and this file is made of such calls:
+# the session is then left as it is. Reading a property is allowed there.
+if (-not ([string]$ExecutionContext.SessionState.LanguageMode -ceq 'FullLanguage')) { return }
 if ($null -ne $ExecutionContext.SessionState.PSVariable.GetValue('global:__sereno')) { return }
 
 # Everything this file keeps for the session lives in this one variable.
@@ -36,14 +40,17 @@ $global:__sereno = @{
         'reset' = '<% .ResetPS %>'
     }
 
-    # Reads the mode file: five lines, anything else means the defaults.
+    # Reads the mode file: five lines, anything else means the defaults. The
+    # bytes decide, as they do for sereno itself and in bash: read as ASCII,
+    # a byte order mark or a letter outside ASCII is a question mark, and
+    # the file is malformed.
     Read = {
         $s = $global:__sereno
         $values = 'auto', 'soft', 'profile', 'profile', 'on'
         $file = $s['ModeFile']
         if ($file) {
             if ([System.IO.File]::Exists($file)) {
-                if ([System.IO.File]::ReadAllText($file) -cmatch '\Amode=(?<m>auto|dark|light|hc|hc-light)\nflavor=(?<f>soft|vivid)\ninband=(?<i>profile|always|off)\nkeys=(?<k>profile|always|off)\nprompt=(?<p>on|off)\n\z') {
+                if ([System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($file)) -cmatch '\Amode=(?<m>auto|dark|light|hc|hc-light)\nflavor=(?<f>soft|vivid)\ninband=(?<i>profile|always|off)\nkeys=(?<k>profile|always|off)\nprompt=(?<p>on|off)\n\z') {
                     $values = $Matches['m'], $Matches['f'], $Matches['i'], $Matches['k'], $Matches['p']
                 }
             }
@@ -104,8 +111,10 @@ $global:__sereno = @{
         $s = $global:__sereno
         $file = $s['ModeFile']
         if ($file) {
+            # The time is kept only once the file has been read: a file that
+            # another program holds at this moment is read at the next prompt.
             $stamp = [System.IO.File]::GetLastWriteTimeUtc($file).Ticks
-            if ($stamp -ne $s['Stamp']) { $s['Stamp'] = $stamp; & $s['Read'] }
+            if ($stamp -ne $s['Stamp']) { & $s['Read']; $s['Stamp'] = $stamp }
         }
         $set = $s['Settings']
         if (($set[2] -ceq 'always') -or (($set[2] -ceq 'profile') -and $s['Profile'])) {
@@ -314,34 +323,39 @@ $global:__sereno = @{
                 if ($location.Provider.Name -ceq 'FileSystem') {
                     $dir = $location.ProviderPath
                     if ($terminal) { $out += $e + ']9;9;"' + $dir + '"' + $s['Bel'] }
-                    # The branch, read from the files of the repository.
-                    $head = ''
-                    while ($dir) {
-                        $git = [System.IO.Path]::Combine($dir, '.git')
-                        if ([System.IO.Directory]::Exists($git)) { $head = [System.IO.Path]::Combine($git, 'HEAD'); break }
-                        if ([System.IO.File]::Exists($git)) {
-                            $text = [System.IO.File]::ReadAllText($git)
+                    # The branch, read from the files of the repository. A
+                    # file that cannot be read at this moment, because
+                    # another program holds it, means a prompt without the
+                    # branch, not a prompt that fails.
+                    try {
+                        $head = ''
+                        while ($dir) {
+                            $git = [System.IO.Path]::Combine($dir, '.git')
+                            if ([System.IO.Directory]::Exists($git)) { $head = [System.IO.Path]::Combine($git, 'HEAD'); break }
+                            if ([System.IO.File]::Exists($git)) {
+                                $text = [System.IO.File]::ReadAllText($git)
+                                $end = $text.IndexOf([char]10)
+                                if ($end -ge 0) { $text = $text.Substring(0, $end) }
+                                $text = $text.TrimEnd([char]13)
+                                if ($text.StartsWith('gitdir: ', [System.StringComparison]::Ordinal)) {
+                                    $text = $text.Substring(8)
+                                    if (-not [System.IO.Path]::IsPathRooted($text)) { $text = [System.IO.Path]::Combine($dir, $text) }
+                                    if ([System.IO.Directory]::Exists($text)) { $head = [System.IO.Path]::Combine($text, 'HEAD'); break }
+                                }
+                            }
+                            $dir = [System.IO.Path]::GetDirectoryName($dir)
+                        }
+                        if ($head -and [System.IO.File]::Exists($head)) {
+                            $text = [System.IO.File]::ReadAllText($head)
                             $end = $text.IndexOf([char]10)
                             if ($end -ge 0) { $text = $text.Substring(0, $end) }
                             $text = $text.TrimEnd([char]13)
-                            if ($text.StartsWith('gitdir: ', [System.StringComparison]::Ordinal)) {
-                                $text = $text.Substring(8)
-                                if (-not [System.IO.Path]::IsPathRooted($text)) { $text = [System.IO.Path]::Combine($dir, $text) }
-                                if ([System.IO.Directory]::Exists($text)) { $head = [System.IO.Path]::Combine($text, 'HEAD'); break }
-                            }
+                            if ($text.StartsWith('ref: refs/heads/', [System.StringComparison]::Ordinal)) { $branch = $text.Substring(16) }
+                            elseif ($text.Length -gt 7) { $branch = $text.Substring(0, 7) }
+                            else { $branch = $text }
+                            $branch = [regex]::Replace($branch, '\p{Cc}', '')
                         }
-                        $dir = [System.IO.Path]::GetDirectoryName($dir)
-                    }
-                    if ($head -and [System.IO.File]::Exists($head)) {
-                        $text = [System.IO.File]::ReadAllText($head)
-                        $end = $text.IndexOf([char]10)
-                        if ($end -ge 0) { $text = $text.Substring(0, $end) }
-                        $text = $text.TrimEnd([char]13)
-                        if ($text.StartsWith('ref: refs/heads/', [System.StringComparison]::Ordinal)) { $branch = $text.Substring(16) }
-                        elseif ($text.Length -gt 7) { $branch = $text.Substring(0, 7) }
-                        else { $branch = $text }
-                        $branch = [regex]::Replace($branch, '\p{Cc}', '')
-                    }
+                    } catch { $branch = '' }
                 }
 
                 # A leading home folder is shown as ~.

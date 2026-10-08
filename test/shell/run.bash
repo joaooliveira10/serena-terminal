@@ -15,6 +15,7 @@
 # --modes     the shared truth table; default testdata/modes.tsv
 # --registry  the stand-ins for /proc/registry; default testdata/registry
 # --only      run only the sessions whose name contains this text
+# --where     print the folder of the repository this file belongs to, and stop
 #
 # How it works: every scenario is a "session", a fresh interactive child bash
 # started with --noprofile --norc that sources init.bash the way an rc file
@@ -26,9 +27,12 @@
 
 set -u
 
-here=${BASH_SOURCE[0]%/*}
-[ "$here" = "${BASH_SOURCE[0]}" ] && here=.
-repo=$(cd "$here/../.." && pwd)
+# The folder this file is in. On Windows the file may be named with
+# backslashes, as PowerShell names it, and then %/* would cut nothing off.
+here=${BASH_SOURCE[0]}
+case ${OSTYPE-} in msys*|cygwin*) here=${here//\\//} ;; esac
+case $here in */*) here=${here%/*} ;; *) here=. ;; esac
+repo=$(cd "$here/../.." && pwd) || exit 2
 init=$repo/testdata/golden/init/init.bash
 golden=$repo/testdata/golden
 modes=$repo/testdata/modes.tsv
@@ -41,6 +45,7 @@ while [ $# -gt 0 ]; do
         --modes) modes=$2; shift 2 ;;
         --registry) registry=$2; shift 2 ;;
         --only) only=$2; shift 2 ;;
+        --where) printf '%s\n' "$repo"; exit 0 ;;
         *) printf 'run.bash: unknown argument %s\n' "$1" >&2; exit 2 ;;
     esac
 done
@@ -96,6 +101,15 @@ after=$(compgen -v | grep -c '^__sereno' || :)
 funcs=$(compgen -A function | grep -c '^__sereno' || :)
 check 'init.bash returns at once in a shell that is not interactive' [ "$before$after$funcs" = 000 ]
 
+# The scripts of the repository find it whatever way they are named:
+# PowerShell hands a file to Git Bash by a path with backslashes.
+if [ -n "$windows" ]; then
+    for script in test/shell/run.bash scripts/bench.sh; do
+        named=$(cygpath -w "$repo/$script")
+        check "$script finds the repository when it is named with backslashes" [ "$("$BASH" --noprofile --norc "$named" --where 2>&1)" = "$repo" ]
+    done
+fi
+
 # ---------------------------------------------------------------------------
 # The temporary world of the sessions.
 
@@ -105,7 +119,7 @@ cleanup() { rm -rf "$tmp"; }
 trap cleanup EXIT
 home=$tmp/home
 empty=$tmp/empty-path
-mkdir -p "$home" "$empty" "$tmp/sessions" "$tmp/homex"
+mkdir -p "$home" "$empty" "$tmp/sessions" "$tmp/homex" "$tmp/folder-for-mode/mode"
 
 # ROOT in its default place, so that the hook line of R21 finds it.
 base_env=()
@@ -261,7 +275,7 @@ slurp "$T_TMP/err"; check_eq "$REPLY" '' 'init.bash writes nothing to standard e
 words "$vars_before"; old=$REPLY; words "$(compgen -v)"; added "$old vars_before funcs_before exported_before options_before flags_before here old REPLY" "$REPLY"
 check_eq "$REPLY" 'LSCOLORS LS_COLORS PROMPT_COMMAND __sereno_branch __sereno_flavor __sereno_hc __sereno_hcl __sereno_inband __sereno_last __sereno_light __sereno_loaded __sereno_mode __sereno_profile __sereno_prompt_on __sereno_reg __sereno_reply __sereno_root __sereno_show __sereno_term __sereno_variant' 'init.bash creates the variables it needs and no other'
 words "$funcs_before"; old=$REPLY; words "$(compgen -A function)"; added "$old" "$REPLY"
-check_eq "$REPLY" '__sereno_byte __sereno_find_branch __sereno_follow __sereno_paint __sereno_prompt __sereno_resolve __sereno_settings __sereno_signals' 'init.bash defines its functions and no other'
+check_eq "$REPLY" '__sereno_byte __sereno_find_branch __sereno_follow __sereno_paint __sereno_prompt __sereno_resolve __sereno_set __sereno_settings __sereno_signals' 'init.bash defines its functions and no other'
 words "$exported_before"; old=$REPLY; words "$(compgen -e)"; added "$old" "$REPLY"
 check_eq "$REPLY" 'LSCOLORS LS_COLORS' 'init.bash exports LS_COLORS and LSCOLORS and nothing else'
 check_eq "$(shopt -p; set +o; alias; complete -p 2> /dev/null)" "$options_before" 'init.bash leaves options, aliases and completions alone'
@@ -403,6 +417,16 @@ for at in 1 2 3 4 5; do
 done
 printf 'mode=auto\r\nflavor=vivid\ninband=always\nkeys=off\nprompt=off\n' > "$T_ROOT/mode"; settings 'a carriage return after mode=auto' "$defaults"
 : > "$T_ROOT/mode"; settings 'an empty file' "$defaults"
+printf 'mode=light\nflavor=vivid\ninband=always\nkeys=off\n' > "$T_ROOT/mode"; settings 'four lines' "$defaults"
+mode_file light loud; settings 'an unknown flavour' "$defaults"
+printf 'mode= light\nflavor=vivid\ninband=always\nkeys=off\nprompt=off\n' > "$T_ROOT/mode"; settings 'a space after the equals sign' "$defaults"
+# R11: the file is ASCII. With a byte order mark in front, as an editor may
+# save it, it is malformed here as it is for sereno itself and in PowerShell.
+printf '\357\273\277mode=light\nflavor=vivid\ninband=always\nkeys=off\nprompt=off\n' > "$T_ROOT/mode"; settings 'a byte order mark' "$defaults"
+mode_file light vivid always off off; settings 'a valid file again' 'light vivid always off'
+# A folder where the file should be: the session would say so on standard
+# error if reading it made bash complain, and that fails the session.
+__sereno_root=$T_TMP/folder-for-mode; settings 'a folder in its place' "$defaults"
 BODY
 
 # The table once more, through the registry: one session per tree, whose
@@ -575,7 +599,9 @@ BODY
 }
 default_ls='di=1;34:ln=36:so=35:pi=33:ex=1;32:bd=1;33:cd=1;33:su=1;31:sg=1;33:tw=4;34:ow=4;34:st=4;34:or=31:mi=31'
 ls_case 'unset' - "$default_ls"
-ls_case 'empty' '' ''
+# GNU ls uses its built-in table, backgrounds and all, for an LS_COLORS that
+# is set but empty, exactly as for one that is unset.
+ls_case 'empty' '' "$default_ls"
 ls_case 'the built-in table of GNU ls' \
     'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:' \
     'rs=0:di=01;34:ln=01;36:mh=00:pi=33:so=01;35:do=01;35:bd=1;33:cd=1;33:or=31:mi=00:su=1;31:sg=1;33:ca=31:tw=4;34:ow=4;34:st=4;34:ex=01;32:*.tar=01;31:'
@@ -583,6 +609,25 @@ ls_case 'without any background' 'di=01;34:*.zip=01;31:ex=32' 'di=01;34:*.zip=01
 ls_case 'backgrounds on other entries' '*.log=44;37:di=1;44:*.x=42:ex=100;1;97:ln=01;36' '*.log=37:di=1:*.x=:ex=1;97:ln=01;36'
 ls_case 'colour arguments of 38 and 48' '*.a=38;5;44:*.b=48;5;44;31:*.c=38;2;40;41;42:mi=38;5;41;45:do=38;5;44' '*.a=38;5;44:*.b=48;5;44;31:*.c=38;2;40;41;42:mi=31:do=38;5;44'
 ls_case 'odd entries' ':x:=44::di=44:' ':x:=::di=:'
+ls_case 'the twelve file types of R33' \
+    'su=37;41:sg=30;43:tw=30;42:ow=34;42:st=37;44:ca=30;41:bd=40;33;01:cd=40;33;01:pi=40;33:or=40;31;01:mi=01;05;37;41:do=01;35;45' \
+    'su=1;31:sg=1;33:tw=4;34:ow=4;34:st=4;34:ca=31:bd=1;33:cd=1;33:pi=33:or=31:mi=31:do=1;35'
+ls_case 'the twelve file types without a background' 'su=31:ow=34:do=01;35:di=01;34' 'su=31:ow=34:do=01;35:di=01;34'
+ls_case 'a single entry' 'ow=34;42' 'ow=4;34'
+ls_case 'an entry without an equals sign' 'no-equals-sign:ow=34;42' 'no-equals-sign:ow=4;34'
+ls_case 'a second equals sign in an entry' '*.a=b=42:ow=103' '*.a=b=42:ow=4;34'
+ls_case 'a value that is a word' 'ln=target:ow=100;30' 'ln=target:ow=4;34'
+
+session 'ls colours: set but empty and not exported' <<'BODY'
+unset LS_COLORS LSCOLORS
+LS_COLORS= LSCOLORS=
+exported_before=$(compgen -e)
+source_init
+check_eq "$LS_COLORS" 'di=1;34:ln=36:so=35:pi=33:ex=1;32:bd=1;33:cd=1;33:su=1;31:sg=1;33:tw=4;34:ow=4;34:st=4;34:or=31:mi=31' 'an empty LS_COLORS counts as unset and gets the table of R33'
+check_eq "$LSCOLORS" 'exfxcxdxbxDxDxBxDxExEx' 'an empty LSCOLORS counts as unset and gets the table without backgrounds'
+words "$exported_before"; old=$REPLY; words "$(compgen -e)"; added "$old" "$REPLY"
+check_eq "$REPLY" 'LSCOLORS LS_COLORS' 'and both are exported'
+BODY
 
 session 'ls colours: the rest of the environment' LSCOLORS=Gxfxcxdxbxegedabagacad GREP_COLORS='mt=01;41' <<'BODY'
 exported_before=$(compgen -e)
@@ -619,6 +664,174 @@ set +e
 slurp "$T_TMP/out"; got=$REPLY; palette dark
 check_eq "$got" "$REPLY" 'init.bash and the hook run to their end under set -e'
 BODY
+
+# R23: a variable of the user's that is read-only. An assignment would make
+# bash print "readonly variable" and abandon the function at that point. A
+# read-only PROMPT_COMMAND is an audit setting on shared machines.
+session 'a read-only PROMPT_COMMAND' $profile SERENO_OS_MODE=dark 'LS_COLORS=ow=34;42' <<'BODY'
+PROMPT_COMMAND='theirs'
+readonly PROMPT_COMMAND
+PS1='theirs> '
+source_init
+slurp "$T_TMP/out"; out=$REPLY; slurp "$T_TMP/err"
+check_eq "$out$REPLY" '' 'a read-only PROMPT_COMMAND: init.bash prints nothing'
+check_eq "$PROMPT_COMMAND" 'theirs' 'and it stays as it is'
+check_eq "$__sereno_show$__sereno_term" '' 'the hook that could not be installed is not counted on'
+check_eq "$LS_COLORS/$LSCOLORS" 'ow=4;34/exfxcxdxbxDxDxBxDxExEx' 'the colours of ls are set all the same'
+check_eq "$PS1/$__sereno_loaded" 'theirs> /1' 'and the rest of the file ran'
+BODY
+
+session 'a read-only PROMPT_COMMAND without a value' $profile SERENO_OS_MODE=dark <<'BODY'
+readonly PROMPT_COMMAND
+source_init
+slurp "$T_TMP/out"; out=$REPLY; slurp "$T_TMP/err"
+check_eq "$out$REPLY" '' 'a read-only PROMPT_COMMAND that is not set: init.bash prints nothing'
+check_eq "${PROMPT_COMMAND-unset}/$__sereno_show$__sereno_term/$LSCOLORS" 'unset//exfxcxdxbxDxDxBxDxExEx' 'it stays unset, and the rest of the file ran'
+BODY
+
+session 'a read-only PROMPT_COMMAND that is an array' $profile SERENO_OS_MODE=dark <<'BODY'
+PROMPT_COMMAND=(first 'second one')
+readonly PROMPT_COMMAND
+source_init
+slurp "$T_TMP/out"; out=$REPLY; slurp "$T_TMP/err"
+check_eq "$out$REPLY" '' 'a read-only PROMPT_COMMAND that is an array: init.bash prints nothing'
+check_eq "${#PROMPT_COMMAND[@]}:${PROMPT_COMMAND[0]}:${PROMPT_COMMAND[1]}/$__sereno_show$__sereno_term/$LSCOLORS" '2:first:second one//exfxcxdxbxDxDxBxDxExEx' 'it keeps its elements, and the rest of the file ran'
+BODY
+
+session 'a read-only PS1' $profile SERENO_OS_MODE=dark <<'BODY'
+PS1='theirs> '
+readonly PS1
+source_init
+slurp "$T_TMP/out"; out=$REPLY; slurp "$T_TMP/err"
+check_eq "$out$REPLY" '' 'a read-only PS1: init.bash prints nothing'
+cd "$T_HOME/repo"
+after 3; got=$REPLY; palette dark
+check_eq "$got" "$REPLY" 'the hook says nothing either, and the session follows the system'
+check_eq "$PS1/$T_RC" 'theirs> /3' 'the prompt stays as it is, and the exit status is passed on'
+after 0
+check_eq "$REPLY/$PS1/$__sereno_show" '/theirs> /' 'and setting it is not tried again'
+BODY
+
+session 'a read-only LS_COLORS' 'LS_COLORS=ow=34;42' <<'BODY'
+readonly LS_COLORS
+source_init
+slurp "$T_TMP/out"; out=$REPLY; slurp "$T_TMP/err"
+check_eq "$out$REPLY" '' 'a read-only LS_COLORS: init.bash prints nothing'
+check_eq "$LS_COLORS/$LSCOLORS/$PROMPT_COMMAND" 'ow=34;42/exfxcxdxbxDxDxBxDxExEx/__sereno_prompt' 'it stays as it is, and the rest of the file ran'
+BODY
+
+# Before bash 4.4, printf -v reports success for a variable it could not set.
+# A printf that does the same stands in for such a bash here.
+session 'a read-only PROMPT_COMMAND where printf does not report it' $profile SERENO_OS_MODE=dark <<'BODY'
+printf() { builtin printf "$@"; return 0; }
+PROMPT_COMMAND='theirs'
+readonly PROMPT_COMMAND
+source_init
+slurp "$T_TMP/out"; out=$REPLY; slurp "$T_TMP/err"
+check_eq "$out$REPLY" '' 'init.bash prints nothing'
+check_eq "$PROMPT_COMMAND/$__sereno_show$__sereno_term" 'theirs/' 'and sees by the value that the hook could not be installed'
+BODY
+
+session 'a read-only PS1 where printf does not report it' $profile SERENO_OS_MODE=dark <<'BODY'
+printf() { builtin printf "$@"; return 0; }
+PS1='theirs> '
+readonly PS1
+source_init
+after 0; got=$REPLY; palette dark
+check_eq "$got" "$REPLY" 'the hook says nothing, and the session follows the system'
+check_eq "$PS1/$__sereno_show" 'theirs> /' 'and it sees by the value that the prompt could not be set'
+BODY
+
+# With set -e, bash ends the shell on any failed write to a read-only
+# variable, whatever the place of the command: not even `|| :` saves it.
+session 'read-only variables in a shell with set -e' $profile SERENO_OS_MODE=dark 'LS_COLORS=ow=34;42' <<'BODY'
+PS1='theirs> '
+readonly LS_COLORS PS1
+set -e
+source_init
+flags=$-
+cd "$T_HOME/repo"
+__sereno_prompt > "$T_TMP/out" 2> "$T_TMP/err"
+flags=$flags/$-
+set +e
+slurp "$T_TMP/err"
+check_eq "$REPLY" '' 'variables that cannot be set do not end a shell that runs with set -e, and nothing is said'
+check_eq "$LS_COLORS/$LSCOLORS/$PROMPT_COMMAND/$PS1" 'ow=34;42/exfxcxdxbxDxDxBxDxExEx/__sereno_prompt/theirs> ' 'they stay as they are, and the rest ran'
+case $flags in *e*/*e*) ok 'and set -e is in force again afterwards' ;; *) not_ok 'and set -e is in force again afterwards' "$flags" ;; esac
+BODY
+
+session 'a read-only LS_COLORS and LSCOLORS without a value' <<'BODY'
+unset LS_COLORS LSCOLORS
+readonly LS_COLORS LSCOLORS
+source_init
+slurp "$T_TMP/out"; out=$REPLY; slurp "$T_TMP/err"
+check_eq "$out$REPLY" '' 'read-only LS_COLORS and LSCOLORS that are not set: init.bash prints nothing'
+check_eq "${LS_COLORS-unset}/${LSCOLORS-unset}/$PROMPT_COMMAND" 'unset/unset/__sereno_prompt' 'they stay unset, and the rest of the file ran'
+BODY
+
+# R23 and R30: a file that another program holds at the moment of a prompt.
+# Only Windows lets a program keep every reader out of a file, and Windows
+# PowerShell does the holding here, from outside the session: it waits for the
+# session to say it is ready, opens the mode file and HEAD without sharing,
+# and lets go when the session says so.
+holder=
+if [ -n "$windows" ] && [ -n "${SYSTEMROOT-}" ]; then
+    holder=$(cygpath -u "$SYSTEMROOT")/System32/WindowsPowerShell/v1.0/powershell.exe
+    [ -x "$holder" ] || holder=
+fi
+case 'files held by another program' in
+    *"$only"*)
+        if [ -z "$holder" ]; then
+            report 'skip - files held by another program: only Windows keeps a reader out of a file, and Windows PowerShell does the holding'
+        else
+            cat > "$tmp/hold.ps1" <<'HOLD'
+param([string]$Folder, [string]$First, [string]$Second)
+$wait = { param($name, $there) for ($i = 0; ($i -lt 600) -and ((Test-Path -LiteralPath (Join-Path $Folder $name)) -ne $there); $i++) { Start-Sleep -Milliseconds 50 } }
+& $wait 'hold-ready' $true
+$a = [IO.File]::Open($First, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+$b = [IO.File]::Open($Second, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+[IO.File]::WriteAllText((Join-Path $Folder 'hold-on'), '')
+& $wait 'hold-done' $true
+$a.Dispose(); $b.Dispose()
+[IO.File]::Delete((Join-Path $Folder 'hold-on'))
+HOLD
+            rm -f "$tmp/hold-ready" "$tmp/hold-on" "$tmp/hold-done"
+            "$holder" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(cygpath -w "$tmp/hold.ps1")" \
+                -Folder "$(cygpath -w "$tmp")" -First "$(cygpath -w "$root/mode")" -Second "$(cygpath -w "$home/repo/.git/HEAD")" < /dev/null > "$tmp/hold.log" 2>&1 &
+        fi ;;
+esac
+if [ -n "$holder" ]; then
+    mode='mode=light\nflavor=soft\ninband=always\nkeys=profile\nprompt=on\n'
+    session 'files held by another program' WT_SESSION=test-session SERENO_OS_MODE=dark <<'BODY'
+# until_file FILE STATE: waits for FILE to be there (1) or gone (0). The
+# session has builtins only, and bash 3.2 no way of waiting a moment, so it
+# looks again and again, for a while that is long enough for PowerShell to
+# start.
+until_file() {
+    local n=0
+    while [ "$n" -lt 400000 ]; do
+        if [ -e "$1" ]; then [ "$2" = 0 ] || return 0; else [ "$2" = 1 ] || return 0; fi
+        n=$((n + 1))
+    done
+    return 1
+}
+source_init
+cd "$T_HOME/repo"
+after 0; got=$REPLY; palette light
+check_eq "$got/$__sereno_branch" "$REPLY/feature/x" 'before anything is held: the session paints what the mode file says and shows the branch'
+: > "$T_TMP/hold-ready"
+check 'another program now holds the mode file and HEAD' until_file "$T_TMP/hold-on" 1
+after 4
+check_eq "$REPLY" '' 'while they are held the hook writes nothing: the settings read before stay in force'
+check_eq "$__sereno_mode $__sereno_inband/$__sereno_branch/$T_RC" 'light always//4' 'no branch is shown at that prompt, and the exit status is passed on'
+: > "$T_TMP/hold-done"
+check 'the other program let go' until_file "$T_TMP/hold-on" 0
+after 0
+check_eq "$REPLY/$__sereno_branch" '/feature/x' 'at the next prompt everything is as before'
+BODY
+    mode=$default_mode
+    wait
+fi
 
 # R23: where ROOT is, whatever the way the file is named.
 session 'the file named in other ways' <<'BODY'

@@ -3,6 +3,7 @@ package render
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -311,6 +312,10 @@ func TestCommandLine(t *testing.T) {
 		{"moved root, pwsh", shells.Pwsh, platform.Root{Path: `E:\s`}, `pwsh.exe` + arguments + `"E:\s\shell\init.ps1"`},
 		{"trailing separator", shells.PowerShell, platform.Root{Path: `D:\s\`}, windowsPowerShell + arguments + `"D:\s\shell\init.ps1"`},
 		{"letters outside ASCII stay", shells.PowerShell, platform.Root{Path: `D:\Ação\sereno`}, windowsPowerShell + arguments + `"D:\Ação\sereno\shell\init.ps1"`},
+		// One percent sign cannot be the name of a variable, and stays.
+		{"one percent sign", shells.PowerShell, platform.Root{Path: `D:\100% mine\sereno`}, windowsPowerShell + arguments + `"D:\100% mine\sereno\shell\init.ps1"`},
+		{"a percent sign at the end", shells.Pwsh, platform.Root{Path: `D:\s%`}, `pwsh.exe` + arguments + `"D:\s%\shell\init.ps1"`},
+		{"characters a shell would stumble on", shells.PowerShell, platform.Root{Path: `D:\it's & (a) [b] $c ` + "`d" + ` {e}, @f #g ^h !i =j +k ~l; -File x`}, windowsPowerShell + arguments + `"D:\it's & (a) [b] $c ` + "`d" + ` {e}, @f #g ^h !i =j +k ~l; -File x\shell\init.ps1"`},
 	}
 	for _, tt := range tests {
 		got, err := CommandLine(tt.shell, tt.root)
@@ -323,10 +328,39 @@ func TestCommandLine(t *testing.T) {
 			t.Errorf("CommandLine accepted the shell %q", shell)
 		}
 	}
-	for _, path := range []string{"", `D:\a"b`, "D:\\a\nb"} {
-		if _, err := CommandLine(shells.PowerShell, platform.Root{Path: path}); err == nil {
+	// Folders that cannot stand in a command line. Windows Terminal expands
+	// %NAME% in it and has no way of writing a percent sign that stays one:
+	// a path with two of them may name a variable that happens to exist, and
+	// the profile would then start PowerShell on a file that is not there.
+	refused := []string{
+		"", `D:\a"b`, "D:\\a\nb", "D:\\a\rb",
+		`D:\%TEMP%`, `D:\a%TEMP%b\sereno`, `D:\%a%`, `D:\50%\75%`, `%USERPROFILE%\sereno`, `D:\%%`,
+	}
+	for _, path := range refused {
+		_, err := CommandLine(shells.PowerShell, platform.Root{Path: path})
+		if err == nil {
 			t.Errorf("CommandLine accepted the folder %q", path)
+			continue
 		}
+		if !errors.Is(err, ErrRootInCommandLine) {
+			t.Errorf("CommandLine(%q) failed with %v, which is not ErrRootInCommandLine", path, err)
+		}
+		options := defaultOptions()
+		options.Root = platform.Root{Path: path}
+		if _, err := Fragment(loadPalette(t), options); !errors.Is(err, ErrRootInCommandLine) {
+			t.Errorf("Fragment with the folder %q: %v, want ErrRootInCommandLine", path, err)
+		}
+	}
+	// The default ROOT is written with a variable on purpose, and without a
+	// profile there is no command line to refuse.
+	if _, err := CommandLine(shells.PowerShell, platform.Root{Path: `D:\%TEMP%`, Default: true}); err != nil {
+		t.Errorf("the default ROOT was refused: %v", err)
+	}
+	without := defaultOptions()
+	without.Profile = false
+	without.Root = platform.Root{Path: `D:\%TEMP%`}
+	if _, err := Fragment(loadPalette(t), without); err != nil {
+		t.Errorf("a fragment without a profile was refused for its ROOT: %v", err)
 	}
 }
 

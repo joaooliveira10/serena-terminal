@@ -123,7 +123,7 @@ func TestInitFilesUseSlotsOnly(t *testing.T) {
 	replacement := regexp.MustCompile(`__sereno_reply='?([0-9;]+)'? ;;`)
 	for _, shell := range []shells.Shell{shells.Bash, shells.Zsh} {
 		text := initFile(t, shell)
-		line := regexp.MustCompile(`LS_COLORS='([^']+)'`).FindStringSubmatch(text)
+		line := regexp.MustCompile(`__sereno_set LS_COLORS '([^']+)' && export LS_COLORS\n`).FindStringSubmatch(text)
 		if line == nil {
 			t.Fatalf("%s: the default LS_COLORS was not found", shell.InitFile())
 		}
@@ -143,8 +143,15 @@ func TestInitFilesUseSlotsOnly(t *testing.T) {
 				t.Errorf("%s: ls colour %s=%s: %v", shell.InitFile(), v[1], v[2], err)
 			}
 		}
-		if !strings.Contains(text, "LSCOLORS=exfxcxdxbxDxDxBxDxExEx\n") {
+		if !strings.Contains(text, "__sereno_set LSCOLORS exfxcxdxbxDxDxBxDxExEx && export LSCOLORS\n") {
 			t.Errorf("%s: the default LSCOLORS of R33 is missing", shell.InitFile())
+		}
+		// R33 as amended: a variable that is set but empty counts as unset,
+		// because that is how ls takes it.
+		for _, test := range []string{`if [ -z "${LS_COLORS-}" ]; then`, `if [ -z "${LSCOLORS-}" ]; then`} {
+			if !strings.Contains(text, test) {
+				t.Errorf("%s does not contain %s", shell.InitFile(), test)
+			}
 		}
 	}
 
@@ -285,15 +292,93 @@ func TestPowerShellColourTable(t *testing.T) {
 	}
 }
 
+// TestPowerShellStartsCarefully pins three things about init.ps1 that only a
+// real PowerShell can prove (test/shell/run.ps1 does) and that must not be
+// lost where no PowerShell runs the tests.
+func TestPowerShellStartsCarefully(t *testing.T) {
+	text := initFile(t, shells.PowerShell)
+	code := strings.TrimLeft(regexp.MustCompile(`(?m)^[ \t]*#.*\n`).ReplaceAllString(text, ""), "\n")
+
+	// R23: in a session whose language is constrained the file returns
+	// before it calls its first method, which that mode would refuse.
+	guards := []string{
+		"if (-not ($Host.Name -ceq 'ConsoleHost')) { return }\n",
+		"if (-not ([string]$ExecutionContext.SessionState.LanguageMode -ceq 'FullLanguage')) { return }\n",
+		"if ($null -ne $ExecutionContext.SessionState.PSVariable.GetValue('global:__sereno')) { return }\n",
+	}
+	if !strings.HasPrefix(code, strings.Join(guards, "")) {
+		t.Errorf("init.ps1 must begin with its three guards, in this order:\n%s", strings.Join(guards, ""))
+	}
+	before := strings.Join(guards[:2], "")
+	if call := regexp.MustCompile(`\.\w+\(|\]::`).FindString(before); call != "" {
+		t.Errorf("init.ps1 calls a method (%s) before it has looked at the language mode", call)
+	}
+
+	// R11 and R28: the bytes of the mode file decide, as in Go and in bash.
+	// ReadAllText would take a byte order mark off and accept the file.
+	if !strings.Contains(code, "[System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($file)) -cmatch '") {
+		t.Error("init.ps1 does not read the mode file as bytes taken for ASCII")
+	}
+	if strings.Contains(code, "ReadAllText($file)") {
+		t.Error("init.ps1 reads the mode file with ReadAllText, which accepts a byte order mark")
+	}
+
+	// R30: the time of the mode file is kept after the file was read, so
+	// that a read that failed is tried again at the next prompt.
+	if !strings.Contains(code, "if ($stamp -ne $s['Stamp']) { & $s['Read']; $s['Stamp'] = $stamp }\n") {
+		t.Error("init.ps1 does not keep the time of the mode file after reading it")
+	}
+}
+
+// TestShellFilesSetUserVariablesQuietly is R23 for the variables of the user
+// that init.bash and init.zsh set: PS1 or PROMPT, PROMPT_COMMAND, LS_COLORS
+// and LSCOLORS may be read-only, and a plain assignment would then print an
+// error and abandon the function. In bash they are set through __sereno_set,
+// with one exception that is tried through it first.
+func TestShellFilesSetUserVariablesQuietly(t *testing.T) {
+	comment := regexp.MustCompile(`(?m)^\s*#.*$`)
+	bash := comment.ReplaceAllString(initFile(t, shells.Bash), "")
+	plain := regexp.MustCompile(`(?m)(^|[\s;])(PS1|PROMPT_COMMAND|LS_COLORS|LSCOLORS)=`).FindAllString(bash, -1)
+	if len(plain) != 1 || !strings.Contains(bash, "if __sereno_set PROMPT_COMMAND \"$PROMPT_COMMAND\"; then\n                PROMPT_COMMAND=(__sereno_prompt \"${PROMPT_COMMAND[@]}\")\n") {
+		t.Errorf("init.bash assigns to a variable of the user %d times (%q); only the array form of PROMPT_COMMAND may, after __sereno_set has shown that it can", len(plain), plain)
+	}
+	// printf -v, with set -e put aside for the one command (bash ends a shell
+	// that runs with set -e on any failed write to a read-only variable), and
+	// a look at the value afterwards (before bash 4.4 printf reports success
+	// for a variable it could not set).
+	if !strings.Contains(bash, "    case $- in *e*) errexit=1; set +e ;; esac\n    printf -v \"$1\" '%s' \"$2\" 2> /dev/null || failed=1\n    if [ -n \"$errexit\" ]; then set -e; fi\n    if [ \"${!1-}\" != \"$2\" ]; then failed=1; fi\n    return \"$failed\"\n}\n") {
+		t.Error("init.bash does not define __sereno_set as it must be: printf -v, without set -e, value checked")
+	}
+
+	zsh := comment.ReplaceAllString(initFile(t, shells.Zsh), "")
+	for _, want := range []string{
+		"[[ ${(Pt)1} == *readonly* ]] && return 1\n    typeset -g \"$1=$2\"\n",
+		"if [[ ${(t)PROMPT} == *readonly* || ${(t)psvar} == *readonly* ]]; then\n            __sereno_show=\n            return 0\n",
+		"if [[ ${(t)precmd_functions} == *readonly* ]]; then\n            __sereno_show= __sereno_term=\n",
+	} {
+		if !strings.Contains(zsh, want) {
+			t.Errorf("init.zsh does not contain:\n%s", want)
+		}
+	}
+	for _, text := range []string{bash, zsh} {
+		if regexp.MustCompile(`(?m)(^|[\s;])(LS_COLORS|LSCOLORS)=`).MatchString(text) {
+			t.Error("LS_COLORS or LSCOLORS is assigned directly; a read-only one would make the shell print an error")
+		}
+	}
+}
+
 // TestPromptTemplates pins the prompt strings of R26, R31 and R32 as they are
 // written in the files.
 func TestPromptTemplates(t *testing.T) {
+	// The prompt of bash is put together in a local variable and handed to
+	// PS1 in one step that cannot fail loudly (a read-only PS1).
 	bash := initFile(t, shells.Bash)
 	for _, want := range []string{
-		`PS1=$'\\[\033[34m\\]\\w\\[\033[0m\\]'`,
-		`PS1=$PS1$' \\[\033[35m\\]${__sereno_branch}\\[\033[0m\\]'`,
-		`PS1=$PS1$'\\n\\[\033[32m\\]>\\[\033[0m\\] '`,
-		`PS1=$PS1$'\\n\\[\033[31m\\]>\\[\033[0m\\] '`,
+		`ps=$'\\[\033[34m\\]\\w\\[\033[0m\\]'`,
+		`ps=$ps$' \\[\033[35m\\]${__sereno_branch}\\[\033[0m\\]'`,
+		`ps=$ps$'\\n\\[\033[32m\\]>\\[\033[0m\\] '`,
+		`ps=$ps$'\\n\\[\033[31m\\]>\\[\033[0m\\] '`,
+		`__sereno_set PS1 "$ps" || __sereno_show=`,
 	} {
 		if !strings.Contains(bash, want) {
 			t.Errorf("init.bash does not contain %s", want)
