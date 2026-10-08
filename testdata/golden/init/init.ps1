@@ -152,6 +152,60 @@ $global:__sereno = @{
                 $global:__sereno['E'] + '[' + ($kept -join ';') + 'm'
             })
     }
+
+    # $PSStyle, where PowerShell has it: a style that paints a background
+    # loses it. Looked at are Progress.Style, every value of Formatting,
+    # Directory, SymbolicLink and Executable of FileInfo, and every entry of
+    # FileInfo.Extension; what a version does not have is skipped. A style
+    # is rewritten only when it holds a number that could be a background.
+    # The one PowerShell 7 ships with, bold on blue for directories, is
+    # known as it stands (it is compared here, never written); any other is
+    # handed to Foreground, which costs a first use of everything in it.
+    Styles = {
+        param($style)
+        $s = $global:__sereno
+        $look = '[\[;]0*(?:4[0-7]|10[0-7])[;m]'
+        $known = $s['E'] + '[44;1m'
+        $members = @()
+        $extension = $null
+        $top = $style.PSObject.Properties
+        $m = $top['Progress']
+        if ($m) { if ($m.Value) { $members += $m.Value.PSObject.Properties['Style'] } }
+        $m = $top['Formatting']
+        if ($m) { if ($m.Value) { $members += @($m.Value.PSObject.Properties) } }
+        $m = $top['FileInfo']
+        if ($m) {
+            if ($m.Value) {
+                $inner = $m.Value.PSObject.Properties
+                $members += $inner['Directory'], $inner['SymbolicLink'], $inner['Executable']
+                $m = $inner['Extension']
+                if ($m) { $extension = $m.Value }
+            }
+        }
+        foreach ($m in $members) {
+            if ($m) {
+                try {
+                    $old = $m.Value
+                    if ($old -is [string]) {
+                        if ($old -cmatch $look) {
+                            if ($old -ceq $known) { $m.Value = $s['E'] + '[34;1m' }
+                            else { $new = & $s['Foreground'] $old; if ($new -cne $old) { $m.Value = $new } }
+                        }
+                    }
+                } catch {}
+            }
+        }
+        if ($extension) {
+            foreach ($k in @($extension.Keys)) {
+                try {
+                    $old = $extension[$k]
+                    if ($old -is [string]) {
+                        if ($old -cmatch $look) { $new = & $s['Foreground'] $old; if ($new -cne $old) { $extension[$k] = $new } }
+                    }
+                } catch {}
+            }
+        }
+    }
 }
 
 # The rest runs in a scope of its own so that no variable of the caller is
@@ -264,41 +318,7 @@ $global:__sereno = @{
             $private.ProgressBackgroundColor = $Host.UI.RawUI.BackgroundColor
         } else {
             # $PSStyle: the styles that paint a background lose it.
-            & {
-                param($style, $fix)
-                $groups = @()
-                $progress = $style.PSObject.Properties['Progress']
-                if ($progress -and $progress.Value) { $groups += , @($progress.Value, @('Style')) }
-                $formatting = $style.PSObject.Properties['Formatting']
-                if ($formatting -and $formatting.Value) { $groups += , @($formatting.Value, @(foreach ($member in $formatting.Value.PSObject.Properties) { $member.Name })) }
-                $fileInfo = $style.PSObject.Properties['FileInfo']
-                if ($fileInfo -and $fileInfo.Value) { $groups += , @($fileInfo.Value, @('Directory', 'SymbolicLink', 'Executable')) }
-                foreach ($group in $groups) {
-                    foreach ($name in $group[1]) {
-                        try {
-                            $member = $group[0].PSObject.Properties[$name]
-                            if ($member -and ($member.Value -is [string])) {
-                                $fixed = & $fix $member.Value
-                                if ($fixed -cne $member.Value) { $group[0].$name = $fixed }
-                            }
-                        } catch {}
-                    }
-                }
-                if ($fileInfo -and $fileInfo.Value) {
-                    $extensions = $fileInfo.Value.PSObject.Properties['Extension']
-                    if ($extensions -and $extensions.Value) {
-                        foreach ($k in @($extensions.Value.Keys)) {
-                            try {
-                                $old = $extensions.Value[$k]
-                                if ($old -is [string]) {
-                                    $fixed = & $fix $old
-                                    if ($fixed -cne $old) { $extensions.Value[$k] = $fixed }
-                                }
-                            } catch {}
-                        }
-                    }
-                }
-            } $style $s['Foreground']
+            & $s['Styles'] $style
         }
     } catch {}
 

@@ -281,6 +281,16 @@ $library = {
         $text + $LF + $E + $colour + ('>' * ($level + 1)) + $E + '[0m '
     }
     function Go([string]$relative) { Set-Location -LiteralPath (Join-Path $T.Home $relative) }
+    # R25: styles, each without its escape character, and what they are after
+    # init.ps1: a background parameter (40-47, 100-107) is the foreground of
+    # the same slot; the numbers after 38 and 48 are colour arguments.
+    function Samples {
+        [ordered]@{
+            '[44;1m' = '[34;1m'; '[1;103m' = '[1;93m'; '[30;47m' = '[30;37m'; '[100m' = '[90m'; '[32;1m' = '[32;1m'; '[0m' = '[0m'; '[m' = '[m'
+            '[38;5;44m' = '[38;5;44m'; '[38;2;40;41;42m' = '[38;2;40;41;42m'; '[48;5;44;41m' = '[48;5;44;31m'; '[38;5;1;44m' = '[38;5;1;34m'
+            '[01;044m' = '[01;34m'; '[0100;1m' = '[90;1m'; '[1;4m' = '[1;4m'; '[104m' = '[94m'
+        }
+    }
 }
 
 $withReadLine = {
@@ -626,10 +636,7 @@ try {
 
         # R25: a background becomes the foreground of the same slot.
         $fix = $global:__sereno['Foreground']
-        $samples = [ordered]@{
-            '[44;1m' = '[34;1m'; '[1;103m' = '[1;93m'; '[30;47m' = '[30;37m'; '[100m' = '[90m'; '[32;1m' = '[32;1m'; '[0m' = '[0m'; '[m' = '[m'
-            '[38;5;44m' = '[38;5;44m'; '[38;2;40;41;42m' = '[38;2;40;41;42m'; '[48;5;44;41m' = '[48;5;44;31m'; '[38;5;1;44m' = '[38;5;1;34m'
-        }
+        $samples = Samples
         $wrong = @(foreach ($sample in $samples.Keys) { $got = & $fix ($E + $sample); if ($got -cne ($E + $samples[$sample])) { "$sample -> " + (Show $got) } })
         Check ($wrong.Count -eq 0) 'background parameters 40-47 and 100-107 become foregrounds; colour arguments of 38 and 48 are left alone' ($wrong -join ', ')
         CheckEqual (& $fix ($E + '[44;1m' + $E + '[41m')) ($E + '[34;1m' + $E + '[31m') 'every sequence of a value is fixed'
@@ -840,14 +847,48 @@ try {
                 Formatting = [pscustomobject]@{ FormatAccent = $E + '[32;1m'; TableHeader = $E + '[102;30m'; Error = $E + '[31;1m'; Odd = 7 }
                 FileInfo = [pscustomobject]@{ Directory = $E + '[44;1m'; SymbolicLink = $E + '[36;1m'; Executable = $E + '[32;1m'; Extension = $extension }
             }
+            # Every sample of R25 as one more value of Formatting: a style is
+            # handed on to be rewritten only when it looks like it holds a
+            # background, and none that does may be passed over.
+            $samples = Samples
+            $number = 0
+            foreach ($sample in $samples.Keys) { $global:PSStyle.Formatting | Add-Member -NotePropertyName "Sample$number" -NotePropertyValue ($E + $sample); $number++ }
             $progress = "$($Host.PrivateData.ProgressForegroundColor) $($Host.PrivateData.ProgressBackgroundColor)"
             . $T.Init
+            $number = 0
+            $wrong = @(foreach ($sample in $samples.Keys) { $got = $PSStyle.Formatting."Sample$number"; $number++; if ($got -cne ($E + $samples[$sample])) { "$sample -> " + (Show $got) } })
+            Check ($number -gt 10 -and $wrong.Count -eq 0) 'as values of $PSStyle.Formatting the samples of R25 come out as the rule says' ($wrong -join ', ')
             CheckEqual $PSStyle.FileInfo.Directory ($E + '[34;1m') 'FileInfo.Directory loses its blue background and becomes blue text'
             CheckEqual $PSStyle.Formatting.TableHeader ($E + '[92;30m') 'every Formatting value is looked at'
             CheckEqual $PSStyle.FileInfo.Extension['.odd'] ($E + '[31;97m') 'every FileInfo.Extension entry is looked at'
             CheckEqual ($PSStyle.Progress.Style + $PSStyle.Formatting.FormatAccent + $PSStyle.Formatting.Error + $PSStyle.FileInfo.SymbolicLink + $PSStyle.FileInfo.Executable + $PSStyle.FileInfo.Extension['.zip']) ($E + '[33;1m' + $E + '[32;1m' + $E + '[31;1m' + $E + '[36;1m' + $E + '[32;1m' + $E + '[31;1m') 'values without a background are left as they are'
             Check ($PSStyle.Formatting.Odd -eq 7 -and $PSStyle.Progress.MaxWidth -eq 120) 'members that are not styles are left alone'
             CheckEqual "$($Host.PrivateData.ProgressForegroundColor) $($Host.PrivateData.ProgressBackgroundColor)" $progress 'where $PSStyle exists the host colours of the progress bar are not touched'
+            Check ($Error.Count -eq 0) 'and nothing failed' ($(if ($Error.Count) { [string]$Error[0] }))
+        }
+    }
+
+    if (Test-Path variable:PSStyle) {
+        Invoke-Session 'a $PSStyle with styles of the user' @{ SERENO_OS_MODE = 'dark' } $defaultMode {
+            # The $PSStyle of this PowerShell, as a profile may have left it
+            # before init.ps1 runs: backgrounds in each of the places R25
+            # names. Only this process is changed.
+            $PSStyle.Progress.Style = $E + '[1;103m'
+            $PSStyle.Formatting.TableHeader = $E + '[102;30m'
+            $PSStyle.Formatting.Warning = $E + '[38;5;44m'
+            $PSStyle.FileInfo.SymbolicLink = $E + '[48;5;44;41m'
+            $PSStyle.FileInfo.Executable = $E + '[01;044m'
+            $PSStyle.FileInfo.Extension['.odd'] = $E + '[41;97m'
+            $zip = $PSStyle.FileInfo.Extension['.zip']
+            . $T.Init
+            CheckEqual $PSStyle.Progress.Style ($E + '[1;93m') 'Progress.Style loses its background'
+            CheckEqual $PSStyle.Formatting.TableHeader ($E + '[92;30m') 'a value of Formatting loses its background'
+            CheckEqual $PSStyle.Formatting.Warning ($E + '[38;5;44m') 'a colour argument that only looks like a background is left alone'
+            CheckEqual $PSStyle.FileInfo.SymbolicLink ($E + '[48;5;44;31m') 'FileInfo.SymbolicLink: the parameter after the colour arguments loses its background'
+            CheckEqual $PSStyle.FileInfo.Executable ($E + '[01;34m') 'FileInfo.Executable: a background written with a leading zero is one too'
+            CheckEqual $PSStyle.FileInfo.Extension['.odd'] ($E + '[31;97m') 'an entry of FileInfo.Extension loses its background'
+            CheckEqual $PSStyle.FileInfo.Extension['.zip'] $zip 'an entry without a background is left as it is'
+            CheckEqual $PSStyle.FileInfo.Directory ($E + '[34;1m') 'and the directories of PowerShell itself are blue text, as in any session'
             Check ($Error.Count -eq 0) 'and nothing failed' ($(if ($Error.Count) { [string]$Error[0] }))
         }
     }

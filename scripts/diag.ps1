@@ -118,23 +118,25 @@ try {
         }
         $source
     }
-    # The variant: a style of $PSStyle is handed to the function that rewrites
-    # it only when it holds something that looks like a background.
-    function Add-Precheck([string]$source) {
-        $a = '$fixed = & $fix $member.Value'
-        $b = '$fixed = & $fix $old'
-        if ($source.IndexOf($a) -lt 0 -or $source.IndexOf($b) -lt 0) { throw 'the lines of the variant were not found' }
-        $test = "-cmatch '[\[;](?:4[0-7]|10[0-7])[;m]'"
-        $source.Replace($a, "`$fixed = `$member.Value; if (`$fixed $test) { `$fixed = & `$fix `$fixed }").Replace($b, "`$fixed = `$old; if (`$fixed $test) { `$fixed = & `$fix `$fixed }")
+    # The variant: init.ps1 without its walk through $PSStyle, which says
+    # what that walk costs where PowerShell has $PSStyle.
+    function Remove-Walk([string]$source) {
+        $a = "            & `$s['Styles'] `$style`n"
+        if ($source.IndexOf($a) -lt 0) { throw 'the line of the variant was not found' }
+        $source.Replace($a, "            `$null = 1`n")
     }
 
     $files = [ordered]@{
         'as it is' = $text
         'stamped' = (Add-Stamps $text)
-        'variant' = (Add-Precheck $text)
-        'variant stamped' = (Add-Stamps (Add-Precheck $text))
-        # What dot-sourcing any file costs in a fresh process.
+        'without the walk through $PSStyle' = (Remove-Walk $text)
+        'without the walk, stamped' = (Add-Stamps (Remove-Walk $text))
+        # What dot-sourcing any file costs in a fresh process; what reading
+        # a file of this size costs when there is nothing in it to compile;
+        # and init.ps1 without its comment lines.
         'a file of one line' = "`$null = 1`n"
+        'a file of the same size, all comments' = ((@($text.Split("`n") | ForEach-Object { '#' + $_ }) -join "`n") + "`n`$null = 1`n")
+        'without comment lines' = ((@($text.Split("`n") | Where-Object { -not $_.TrimStart().StartsWith('#') }) -join "`n"))
     }
     $paths = @{}
     foreach ($name in $files.Keys) {
