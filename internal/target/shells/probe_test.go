@@ -127,3 +127,27 @@ func TestProbeReadsARealProcess(t *testing.T) {
 		t.Errorf("a program that does not exist: Probe = %v", err)
 	}
 }
+
+// TestProbeDoesNotInheritAPolicy: a PowerShell started with -ExecutionPolicy
+// hands that policy down to its child processes in a variable. The probe asks
+// for the policy a session of the user gets, so the PowerShell it starts must
+// not see that variable. From a Serena tab, which is started with
+// RemoteSigned, the hook would otherwise be accepted on a machine whose stored
+// policy keeps the profile from loading (R20).
+func TestProbeDoesNotInheritAPolicy(t *testing.T) {
+	testenv.New(t)
+	profile := `/home/u/.config/powershell/Microsoft.PowerShell_profile.ps1`
+	if runtime.GOOS == "windows" {
+		profile = `C:\Users\u\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1`
+	}
+	t.Setenv(policyPreferenceEnv, "Bypass")
+	result, err := NewProber().Probe(standIn(t, standInPolicy+profile))
+	if err != nil || result.ProfilePath != profile || result.Policy != "Undefined" {
+		t.Errorf("with %s=Bypass around sereno: Probe = %+v, %v; the PowerShell it starts must not see the variable", policyPreferenceEnv, result, err)
+	}
+
+	kept := withoutVariable([]string{`=C:=C:\x`, "A=1", "psexecutionpolicypreference=Bypass", "PSExecutionPolicyPreferenceX=1", "B="}, policyPreferenceEnv)
+	if want := []string{`=C:=C:\x`, "A=1", "PSExecutionPolicyPreferenceX=1", "B="}; !reflect.DeepEqual(kept, want) {
+		t.Errorf("withoutVariable = %q, want %q", kept, want)
+	}
+}

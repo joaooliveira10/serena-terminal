@@ -27,6 +27,11 @@ func (p processProber) Probe(program string) (ProbeResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, program, ProbeArgs()...)
+	// The policy asked for is the one a session of the user gets. A PowerShell
+	// started with -ExecutionPolicy hands that policy down to its child processes
+	// in a variable, and the Serena profile is started that way: with it, the
+	// probe would report the policy of the session sereno was typed in.
+	command.Env = withoutVariable(command.Environ(), policyPreferenceEnv)
 	// Once the process is stopped, do not wait for ever on its output either.
 	command.WaitDelay = time.Second
 	output, err := command.Output()

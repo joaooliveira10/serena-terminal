@@ -3,6 +3,7 @@ package shells
 import (
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,10 @@ import (
 // tests off when it is left in somebody's environment.
 const standInEnv = "SERENO_TEST_STAND_IN"
 
+// standInPolicy in front of a profile path makes the stand-in answer with
+// that path and with the execution policy it finds in its own environment.
+const standInPolicy = "policy of the environment:"
+
 // TestMain gives every test of this package the hermetic home of rule T1.
 func TestMain(m *testing.M) {
 	answer := os.Getenv(standInEnv)
@@ -26,6 +31,14 @@ func TestMain(m *testing.M) {
 	}
 	if answer == "hang" {
 		time.Sleep(time.Minute)
+	} else if profile, asked := strings.CutPrefix(answer, standInPolicy); asked {
+		// As a PowerShell answers: the profile path, then the policy that
+		// was handed down to it, or none.
+		policy := os.Getenv(policyPreferenceEnv)
+		if policy == "" {
+			policy = "Undefined"
+		}
+		os.Stdout.WriteString(profile + "\r\n" + policy + "\r\n")
 	} else {
 		os.Stdout.WriteString(answer)
 	}

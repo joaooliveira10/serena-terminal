@@ -32,6 +32,24 @@ func (r ProbeResult) blocks() bool {
 	return strings.EqualFold(r.Policy, "Restricted") || strings.EqualFold(r.Policy, "AllSigned")
 }
 
+// policyPreferenceEnv is the variable in which PowerShell keeps a policy given
+// with -ExecutionPolicy for one session, and through which its child processes
+// inherit it.
+const policyPreferenceEnv = "PSExecutionPolicyPreference"
+
+// withoutVariable returns an environment (entries of the form NAME=value)
+// without the variable of that name. Names are compared as Windows compares
+// them, without regard to case.
+func withoutVariable(environment []string, name string) []string {
+	kept := make([]string, 0, len(environment))
+	for _, entry := range environment {
+		if key, _, _ := strings.Cut(entry, "="); !strings.EqualFold(key, name) {
+			kept = append(kept, entry)
+		}
+	}
+	return kept
+}
+
 // Prober asks a PowerShell for its profile path and execution policy. It is an
 // interface so that tests never start a PowerShell: they pass a fake, or set
 // the SERENO_*_PROFILE_PATH variables, in which case no prober is consulted.
