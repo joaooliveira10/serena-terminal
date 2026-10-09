@@ -39,13 +39,13 @@ Everything stays on your machine, in sereno's own folder:
 
 ## The one program it may start
 
-`sereno apply --hook powershell` and `--hook pwsh` need to know where PowerShell keeps your profile. sereno asks PowerShell once:
+An apply that names `powershell` or `pwsh` in `--hook`, a dry run too, needs to know where that PowerShell keeps your profile. It asks it once:
 
 ```text
 powershell.exe -NoProfile -NonInteractive -Command "$PROFILE.CurrentUserCurrentHost; Get-ExecutionPolicy"
 ```
 
-(or `pwsh` with the same arguments). It reads the two lines of the answer and stops the process if there is none within 15 seconds. Nothing else is ever started. If `SERENO_PS_PROFILE_PATH` or `SERENO_PWSH_PROFILE_PATH` names the profile file, not even this is.
+(or `pwsh` with the same arguments). It reads the two lines of the answer and stops the process if there is none within 15 seconds. Later applies look after the line in the file recorded then and start nothing. Nothing else is ever started. If `SERENO_PS_PROFILE_PATH` or `SERENO_PWSH_PROFILE_PATH` names the profile file, not even this is. sereno writes nothing through that process; PowerShell may write the start-up cache it keeps below `%LOCALAPPDATA%\Microsoft\Windows\PowerShell`, as it does at any start (seen in a temporary home).
 
 ## What the Serena profile sets for PowerShell 7
 

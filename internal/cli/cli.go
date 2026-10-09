@@ -48,9 +48,9 @@ type Env struct {
 	// system offers none.
 	Signals mode.Reader
 	// Prober asks a PowerShell for its profile path and execution policy
-	// (R20). It is consulted only for `--hook powershell` or `--hook pwsh`,
-	// and only when the SERENO_*_PROFILE_PATH variable of that shell is not
-	// set. nil refuses to ask.
+	// (R20). It is consulted only by an apply that names `--hook powershell`
+	// or `--hook pwsh`, and only when the SERENO_*_PROFILE_PATH variable of
+	// that shell is not set. nil refuses to ask.
 	Prober shells.Prober
 	// Terminal prepares standard output for escape sequences and reports
 	// whether it is a terminal that interprets them; restore puts back what

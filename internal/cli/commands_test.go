@@ -1200,17 +1200,92 @@ func TestApplyAsksPowerShellOnlyWhenItMust(t *testing.T) {
 	if !strings.Contains(w.read(profile), engine.HookMarker) {
 		t.Error("the hook line is not in the profile the prober named")
 	}
-	// A recorded hook is an option of the next apply (R13), which asks again.
+	// A recorded hook is an option of the next apply (R13), which looks after
+	// it in the file the manifest records and starts nothing (R20): not as a
+	// dry run either, and not when it is another shell that is asked for.
 	w.must(0, "apply")
-	if prober.asked != 2 {
-		t.Errorf("asked %d times after a second apply, want 2", prober.asked)
+	if prober.asked != 1 {
+		t.Errorf("asked %d times after a second apply, which names no shell; want 1", prober.asked)
 	}
-	// status, theme and uninstall never ask (R37, R39).
+	w.must(0, "apply", "--dry-run")
+	if prober.asked != 1 {
+		t.Errorf("asked %d times after a dry run that names no shell, want 1", prober.asked)
+	}
+	w.must(0, "apply", "--hook", "bash", "--dry-run")
+	if prober.asked != 1 {
+		t.Errorf("asked %d times after a dry run for bash, want 1", prober.asked)
+	}
+	// Named again, PowerShell is asked again, by a dry run too.
+	w.must(0, "apply", "--hook", "powershell", "--dry-run")
+	if prober.asked != 2 {
+		t.Errorf("asked %d times after a dry run that names powershell, want 2", prober.asked)
+	}
+	w.must(0, "apply", "--hook", "powershell")
+	if prober.asked != 3 {
+		t.Errorf("asked %d times after an apply that names powershell again, want 3", prober.asked)
+	}
+	// status, theme, export and uninstall never ask (R37, R39).
 	for _, args := range [][]string{{"status"}, {"theme", "dark"}, {"export"}, {"uninstall", "--dry-run"}, {"uninstall"}} {
 		w.must(0, args...)
 	}
-	if prober.asked != 2 {
+	if prober.asked != 3 {
 		t.Errorf("a command other than apply asked PowerShell (%d calls)", prober.asked)
+	}
+}
+
+// TestRecordedHookWhenPowerShellAnswersDifferently is what the amended R20
+// gives up and what it keeps. An apply that does not name the shell looks
+// after the line in the file the manifest records and asks nobody, so it
+// does not notice that PowerShell has come to name another profile (a
+// Documents folder that moved into OneDrive) or that the execution policy
+// has changed. An apply that names the shell still asks, and still refuses.
+func TestRecordedHookWhenPowerShellAnswersDifferently(t *testing.T) {
+	w := newWorld(t, platform.Windows, "wt-present")
+	first := w.home.PSProfile
+	prober := &fakeProber{result: shells.ProbeResult{ProfilePath: first, Policy: "RemoteSigned"}}
+	w.prober = prober
+	w.vars["SERENO_PS_PROFILE_PATH"] = ""
+	w.must(0, "apply", "--hook", "powershell")
+	if prober.asked != 1 || !strings.Contains(w.read(first), engine.HookMarker) {
+		t.Fatalf("asked %d times, and the hook line is not in %s", prober.asked, first)
+	}
+	applied := w.tree()
+
+	moved := filepath.Join(w.home.Dir, "OneDrive", "Documents", "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1")
+	answers := []struct {
+		name   string
+		result shells.ProbeResult
+		naming string // what the refusal of an apply that names the shell says
+	}{
+		{"another profile", shells.ProbeResult{ProfilePath: moved, Policy: "RemoteSigned"}, "sereno uninstall --hook powershell"},
+		{"a policy that loads no profile", shells.ProbeResult{ProfilePath: first, Policy: "Restricted"}, shells.PolicyCommand},
+	}
+	for _, answer := range answers {
+		t.Run(answer.name, func(t *testing.T) {
+			prober.result = answer.result
+			asked := prober.asked
+
+			// Given up: the apply that names no shell keeps the line where it is.
+			kept := w.must(0, "apply")
+			if prober.asked != asked {
+				t.Errorf("an apply that names no shell asked PowerShell (%d calls)", prober.asked-asked)
+			}
+			if !strings.Contains(kept.out, "keep") || !strings.Contains(kept.out, first) {
+				t.Errorf("the plan does not keep the hook line in %s:\n%s", first, kept.out)
+			}
+			sameTree(t, "an apply that names no shell", applied, w.tree())
+
+			// Kept: the apply that names the shell asks, and refuses.
+			refused := w.must(engine.ExitRefused, "apply", "--hook", "powershell")
+			if prober.asked != asked+1 {
+				t.Errorf("an apply that names powershell asked %d times, want once", prober.asked-asked)
+			}
+			if !strings.Contains(refused.err, answer.naming) {
+				t.Errorf("the refusal does not name %q:\n%s", answer.naming, refused.err)
+			}
+			noMissingKey(t, refused.err)
+			sameTree(t, "a refused apply", applied, w.tree())
+		})
 	}
 }
 

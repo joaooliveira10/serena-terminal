@@ -12,7 +12,8 @@ import (
 // ProbeArgs returns the arguments of the one child process sereno ever starts
 // (R2, R20): they make PowerShell print the path of the current user's
 // profile for the console host and the effective execution policy, without
-// loading any profile and without waiting for input. Nothing is written.
+// loading any profile and without waiting for input. sereno writes nothing
+// through it; PowerShell may refresh its own start-up cache.
 func ProbeArgs() []string {
 	return []string{
 		"-NoProfile", "-NonInteractive", "-Command",
@@ -58,6 +59,18 @@ type Prober interface {
 	// have errors of their own, because the user can do something about
 	// them: ErrNoProfilePath and ErrProbeTimeout.
 	Probe(program string) (ProbeResult, error)
+}
+
+// Recorded returns a Prober that starts nothing: it answers with the profile
+// path an earlier apply recorded in the manifest. It names no execution
+// policy, so none is judged; that was done by the apply that put the hook
+// line in, which asked PowerShell.
+func Recorded(path string) Prober { return recorded(path) }
+
+type recorded string
+
+func (r recorded) Probe(string) (ProbeResult, error) {
+	return ProbeResult{ProfilePath: string(r)}, nil
 }
 
 // ProbeTimeout is how long the probe may take. A PowerShell that starts at

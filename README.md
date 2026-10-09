@@ -177,7 +177,7 @@ Nothing to do: no file was written.
 | `--keys profile\|always\|off` | Where the PSReadLine comfort keys apply: in the Serena profile, in every session, or never. |
 | `--prompt on\|off` | The Serena prompt: path, branch, result of the last command. |
 
-Options you leave out keep the value of the previous apply. That includes `--no-profile` (to get the profile back: `sereno uninstall`, then `sereno apply`) and hook lines: a hook that was asked for once is checked by every later apply, and `sereno uninstall --hook LIST` withdraws it.
+Options you leave out keep the value of the previous apply. That includes `--no-profile` (to get the profile back: `sereno uninstall`, then `sereno apply`) and hook lines: a hook that was asked for once is checked by every later apply, in the file where it was put (PowerShell is asked again only when you name it in `--hook` again), and `sereno uninstall --hook LIST` withdraws it.
 
 ### uninstall
 

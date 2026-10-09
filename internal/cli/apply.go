@@ -50,6 +50,9 @@ func runApply(r *run, p parsed) int {
 	for shell := range recorded {
 		wanted[shell] = true
 	}
+	// named holds the shells this command line asks for: only for those may
+	// a PowerShell be started (R20).
+	named := map[shells.Shell]bool{}
 	for _, list := range p.flags["hook"] {
 		requested, err := shells.ParseList(list)
 		if err != nil {
@@ -57,6 +60,7 @@ func runApply(r *run, p parsed) int {
 		}
 		for _, shell := range requested {
 			wanted[shell] = true
+			named[shell] = true
 		}
 	}
 
@@ -116,7 +120,13 @@ func runApply(r *run, p parsed) int {
 			continue
 		}
 		options.Hooks = append(options.Hooks, string(shell))
-		hook, refusal, err := shells.Resolve(host, shell, s.root, r.env.Prober)
+		prober := r.env.Prober
+		if record, ok := s.manifest.Hook(string(shell)); ok && !named[shell] {
+			// A hook of an earlier apply is looked after where that apply
+			// put it: the manifest names the file, and nothing is started.
+			prober = shells.Recorded(record.Path)
+		}
+		hook, refusal, err := shells.Resolve(host, shell, s.root, prober)
 		switch {
 		case err != nil:
 			r.warn(Program + ": " + r.T("error.hook", string(shell), err))

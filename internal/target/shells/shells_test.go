@@ -303,6 +303,35 @@ func TestResolvePowerShellOnWindows(t *testing.T) {
 		}
 	})
 
+	t.Run("a recorded path is the answer and no process starts", func(t *testing.T) {
+		recorded := filepath.Join(home.Dir, "OneDrive", "Documents", "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1")
+		// The path and nothing else: no policy, so none is judged. A program
+		// that does not exist cannot have been started.
+		result, err := Recorded(recorded).Probe(filepath.Join(home.Dir, "no-such-program"))
+		if err != nil || result != (ProbeResult{ProfilePath: recorded}) {
+			t.Errorf("Recorded(%q).Probe = %+v, %v", recorded, result, err)
+		}
+		for _, shell := range []Shell{PowerShell, Pwsh} {
+			hook, refusal, err := Resolve(host(platform.Windows, base), shell, root, Recorded(recorded))
+			if err != nil || refusal != nil {
+				t.Fatalf("%s: refusal %+v, err %v", shell, refusal, err)
+			}
+			if hook.Path != recorded || !hook.NewFileCRLF || hook.Shell != string(shell) {
+				t.Errorf("%s: hook = %+v", shell, hook)
+			}
+		}
+		// What comes before any prober still does: the variable that names
+		// the profile, and the look for the shell on PATH.
+		h := host(platform.Windows, with(map[string]string{"SERENO_PS_PROFILE_PATH": profile}))
+		if hook, refusal, err := Resolve(h, PowerShell, root, Recorded(recorded)); err != nil || refusal != nil || hook.Path != profile {
+			t.Errorf("with the variable set: hook %+v, refusal %+v, err %v", hook, refusal, err)
+		}
+		h = host(platform.Windows, with(map[string]string{"PATH": filepath.Join(home.Dir, "no-such-folder")}))
+		if _, refusal, err := Resolve(h, Pwsh, root, Recorded(recorded)); err != nil || refusal == nil || refusal.Reason.Key != ReasonAbsent {
+			t.Errorf("with the shell gone: refusal %+v, err %v", refusal, err)
+		}
+	})
+
 	t.Run("the other shell's variable does not count", func(t *testing.T) {
 		prober := &fakeProber{result: ProbeResult{ProfilePath: profile, Policy: "RemoteSigned"}}
 		h := host(platform.Windows, with(map[string]string{"SERENO_PWSH_PROFILE_PATH": filepath.Join(home.Dir, "other.ps1")}))

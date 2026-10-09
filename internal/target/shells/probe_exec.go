@@ -18,8 +18,9 @@ type processProber struct {
 
 // NewProber returns the Prober that starts the PowerShell it is given, once,
 // with ProbeArgs(). The process reads the profile path and the execution
-// policy; it loads no profile and changes nothing. It gets ProbeTimeout to
-// answer and is stopped when it takes longer.
+// policy and loads no profile. sereno writes nothing through it; PowerShell
+// may refresh its own start-up cache. It gets ProbeTimeout to answer and is
+// stopped when it takes longer.
 func NewProber() Prober { return processProber{timeout: ProbeTimeout} }
 
 // Probe implements Prober.
