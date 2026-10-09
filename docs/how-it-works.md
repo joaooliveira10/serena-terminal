@@ -134,7 +134,7 @@ PowerShell 7 and zsh were measured in the same way on the runners of CI, in six 
 
 ## The prompt and the line editor
 
-These are set up by the session files, and only in an interactive session.
+These are set up by the session files. bash and zsh do so only in an interactive shell. `init.ps1` has no such test: it runs in every console-host session that loads it, and with a hook line that includes a PowerShell that only runs a command or a script.
 
 PowerShell (`init.ps1`, the same file for 5.1 and 7):
 
@@ -143,7 +143,7 @@ PowerShell (`init.ps1`, the same file for 5.1 and 7):
 - A prompt of your own is kept. Inside Windows Terminal it is wrapped so that the check above still runs after it; its output is returned unchanged.
 - Inside Windows Terminal the Serena prompt also emits the marks that let the terminal find prompts and the current folder (OSC 133 and OSC 9;9).
 - The colours of PSReadLine, the line editor, are set through slots, when PSReadLine is already loaded. Keys of newer PSReadLine versions are set only where they exist.
-- The comfort keys, where the `keys` setting allows them: Tab opens the completion menu, the up and down arrows search the history for what is already typed, the bell is off, duplicates are kept out of the history, and history predictions are switched on where PSReadLine has them, they were off, and PSReadLine can show them (on Windows it cannot where the output is redirected or the console has no virtual terminal sequences). Nothing else is bound, and no module is loaded.
+- The comfort keys, where the `keys` setting allows them: Tab opens the completion menu, the up and down arrows search the history for what is already typed, the bell is off, a repeated command comes up only once when the history is recalled (the history file still keeps every line), and history predictions are switched on where PSReadLine has them, they were off, and PSReadLine can show them (on Windows it cannot where the output is redirected or the console has no virtual terminal sequences). Nothing else is bound, and no module is loaded.
 
 bash (`init.bash`, written for bash 3.2 and newer) and zsh (`init.zsh`):
 
