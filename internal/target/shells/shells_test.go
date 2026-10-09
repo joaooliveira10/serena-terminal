@@ -305,9 +305,16 @@ func TestResolvePowerShellOnWindows(t *testing.T) {
 
 	t.Run("a recorded path is the answer and no process starts", func(t *testing.T) {
 		recorded := filepath.Join(home.Dir, "OneDrive", "Documents", "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1")
-		// The path and nothing else: no policy, so none is judged. A program
-		// that does not exist cannot have been started.
-		result, err := Recorded(recorded).Probe(filepath.Join(home.Dir, "no-such-program"))
+		// The path and nothing else: no policy, so none is judged. It is
+		// handed a program that is there and would answer, as the real
+		// prober shows: the stand-in process of this package, with another
+		// profile and a policy that refuses. Had it been started, the answer
+		// would be that one.
+		program := standIn(t, profile+"\r\nRestricted\r\n")
+		if started, err := NewProber().Probe(program); err != nil || started != (ProbeResult{ProfilePath: profile, Policy: "Restricted"}) {
+			t.Fatalf("the stand-in process does not answer when it is started: %+v, %v", started, err)
+		}
+		result, err := Recorded(recorded).Probe(program)
 		if err != nil || result != (ProbeResult{ProfilePath: recorded}) {
 			t.Errorf("Recorded(%q).Probe = %+v, %v", recorded, result, err)
 		}
