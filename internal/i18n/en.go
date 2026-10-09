@@ -44,7 +44,7 @@ var english = map[string]string{
 
 	// What apply says about Windows Terminal (R19, wording fixed there).
 	"wt.notice.stub": "Windows Terminal adds a short entry for the Serena profile to its own settings.json the first time it sees it, as it does for every fragment profile. sereno does not write that file. Use --no-profile to install only the colour schemes.",
-	"wt.notice.open": "Open a new Windows Terminal window and choose Serena in the new-tab menu. If it is not listed, close every Windows Terminal window and open it again.",
+	"wt.notice.open": "Close every Windows Terminal window, open Windows Terminal again and choose Serena in the new-tab menu. One more window of a Windows Terminal that is already running is not expected to list it.",
 
 	// Plan output of the commands (R13, R14).
 	"plan.summary":       "Total: %s.",
