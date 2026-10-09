@@ -70,7 +70,7 @@ The program is tested with Go 1.27. `go.mod` allows Go 1.24 and newer; a CI job 
 - **Versions.** The fragment uses only keys that exist in the profile schema of Windows Terminal 1.24. The one thing seen on a screen so far, an open tab repainted (see the top of this page), was in 1.24.12741.0; the profile and the colour schemes of the fragment have not been looked at in any version yet. Versions older than 1.24 are not going to be checked.
 - **Its own theme setting** decides whether the dark/light scheme pair follows Windows; see the README. sereno does not change it.
 - **Its own settings file.** Windows Terminal adds an entry for the Serena profile to its `settings.json` the first time it sees the profile. sereno neither writes nor removes that entry; see [uninstall.md](uninstall.md).
-- **Your defaults win.** If your `settings.json` sets a colour scheme, a font or an environment for all profiles (`profiles.defaults`), that takes precedence over what the Serena profile asks for. `sereno status` warns with `wt.defaults-override`.
+- **Your defaults win.** Whatever your `settings.json` sets for all profiles (`profiles.defaults`) takes precedence over what the Serena profile asks for: that is how Windows Terminal 1.24 layers a profile that comes from a fragment, as read in its source. `sereno status` looks for three such settings, a colour scheme, a font and an environment, and warns with `wt.defaults-override`; any other key set there wins as well and is not reported.
 - **The font** named by the profile is Cascadia Code, which comes with Windows Terminal. sereno installs no font.
 - **Windows without Windows Terminal**: the classic console window gets the prompt and the line-editor colours through a hook line, and no palette.
 
