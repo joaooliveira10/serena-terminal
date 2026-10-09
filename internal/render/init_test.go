@@ -478,10 +478,14 @@ func TestPromptTemplates(t *testing.T) {
 	}
 	// The plain console of R26: decided once, outside Windows Terminal and VS
 	// Code, by the background the console names. There no colour of R24 is
-	// set and the prompt is its text. The two conditions are pinned as the
-	// lines of that decision: the one about VS Code also stands, inside a
-	// longer line, where a session of Windows Terminal is recognised.
+	// set and the prompt is its text. The three conditions are pinned as the
+	// lines of that decision, each with its indentation: the one about VS
+	// Code also stands, inside a longer line, where a session of Windows
+	// Terminal is recognised, and the one about Windows in other places.
+	// That the rule is for Windows only is seen by no session of T7 that
+	// runs on Windows, so this pin is what holds it there.
 	for _, want := range []string{
+		"\n        if ($env:OS -ceq 'Windows_NT') {\n            if (-not $env:WT_SESSION) {\n",
 		"\n            if (-not $env:WT_SESSION) {\n",
 		"\n                if (-not ($env:TERM_PROGRAM -ceq 'vscode')) {\n",
 		`$background = $Host.UI.RawUI.BackgroundColor`,
