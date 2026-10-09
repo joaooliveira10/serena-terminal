@@ -150,6 +150,41 @@ func TestReadmesSayWhatComesAfterApply(t *testing.T) {
 	})
 }
 
+// TestReadmesSayWhatWindowsTerminalKeeps: what an uninstall leaves in the
+// files of Windows Terminal is said by the program, in the sentence of
+// uninstall.remains.terminal, and by the section about uninstalling of each
+// README, in the same words: the entry is to be left, and what Windows
+// Terminal is expected to do with it once it has been closed and opened
+// again. Neither says again that the entry is inactive and hidden, which is
+// not what the source code of Windows Terminal 1.24 says. docs/uninstall.md
+// quotes the English sentence whole
+// (TestUninstallDocumentQuotesRealSentences); the Portuguese one, which is
+// what a Windows in Brazilian Portuguese prints, is held here.
+func TestReadmesSayWhatWindowsTerminalKeeps(t *testing.T) {
+	expected := map[string]string{
+		"en":    "once Windows Terminal has been closed and opened again, it is expected to leave Serena out of its new-tab menu and to go on listing it in its settings, as a profile that is no longer detected",
+		"pt-BR": "depois que o Windows Terminal for fechado e aberto de novo, o esperado é que ele tire o Serena do menu de nova aba e continue a listá-lo nas configurações, como um perfil que não é mais detectado",
+	}
+	bothLanguages(t, func(t *testing.T, lang string) {
+		sentence := i18n.For(i18n.Lang(lang)).T("uninstall.remains.terminal")
+		name, text := readme(t, lang)
+		if !strings.Contains(sentence, expected[lang]) {
+			t.Errorf("uninstall.remains.terminal (%s) no longer says what Windows Terminal is expected to do with the entry:\n%s", lang, sentence)
+		}
+		if !strings.Contains(text, expected[lang]) {
+			t.Errorf("%s does not say what the program says about the entry Windows Terminal keeps: %s", name, expected[lang])
+		}
+		for _, old := range []string{"inactive and hidden", "inativa e oculta"} {
+			if strings.Contains(sentence, old) {
+				t.Errorf("uninstall.remains.terminal (%s) calls the entry %q again", lang, old)
+			}
+			if strings.Contains(text, old) {
+				t.Errorf("%s calls the entry %q again", name, old)
+			}
+		}
+	})
+}
+
 // TestReadmesShowRealOutputOfWindows: the examples that were taken on a
 // Windows home, in the order a reader meets the commands: the hook lines of
 // a dry run, a second apply, status, the plan of an uninstall, a change of
