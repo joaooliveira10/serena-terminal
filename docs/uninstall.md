@@ -44,7 +44,7 @@ This was a dry run. Run the same command without --dry-run to carry it out.
 Nothing was changed.
 ```
 
-When nothing was edited in between, the result is that every file sereno created is gone, every start-up file it touched is byte for byte what it was, and the folders it created are gone. The tests of this repository compare a checksum listing of a whole home folder before the first apply and after the uninstall.
+When nothing was edited in between, the result is that every file sereno created is gone, every start-up file it touched is byte for byte what it was, and the folders it created are gone. The tests of this repository compare a checksum listing of a whole home folder before the first apply and after the uninstall. A session that was open during the uninstall keeps the prompt and the colours it had loaded until it is closed.
 
 `sereno uninstall --hook LIST` does only step 1, for the shells you name (`powershell`, `pwsh`, `bash`, `zsh`), and keeps everything else installed.
 
