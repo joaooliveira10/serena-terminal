@@ -38,14 +38,23 @@ func (s Settings) HasProfile(guid string) bool {
 // FollowsSystem reports whether Windows Terminal's own choice between light
 // and dark follows the Windows setting. Only then does a light/dark scheme
 // pair in a profile follow the system without the in-band route.
+//
+// The rules for a theme of the user are those of the source code of Windows
+// Terminal 1.24, which differs from its documentation page in the first one:
+// a theme that names no window.applicationTheme follows Windows (the default
+// of the key is the system's theme, not "dark"), and a theme that takes the
+// name of a built-in one is ignored.
 func (s Settings) FollowsSystem() bool {
 	switch s.Theme {
-	case "system", "legacySystem":
-		return true
 	case "":
 		return s.ThemePair
+	case "system", "legacySystem":
+		return true
+	case "dark", "light", "legacyDark", "legacyLight":
+		return false
 	}
-	return s.themes[s.Theme] == "system"
+	application, defined := s.themes[s.Theme]
+	return defined && (application == "" || application == "system")
 }
 
 // State is what sereno reads from Windows Terminal's state.json.

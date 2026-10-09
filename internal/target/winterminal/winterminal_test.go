@@ -174,6 +174,12 @@ func TestParseSettings(t *testing.T) {
 		{"custom theme that follows", `{"theme": "mine", "themes": [{"name": "mine", "window": {"applicationTheme": "system"}}]}`, "mine", true, nil, false},
 		{"custom theme that is dark", `{"theme": "mine", "themes": [{"name": "mine", "window": {"applicationTheme": "dark"}}, {"name": "other"}]}`, "mine", false, nil, false},
 		{"custom theme that is not defined", `{"theme": "mine"}`, "mine", false, nil, false},
+		// Windows Terminal 1.24 as its source has it: the default of
+		// applicationTheme is the system's theme, and a theme of the user
+		// with a built-in name is ignored.
+		{"custom theme that names no applicationTheme", `{"theme": "mine", "themes": [{"name": "mine", "window": {"useMica": true}}]}`, "mine", true, nil, false},
+		{"custom theme without a window object", `{"theme": "mine", "themes": [{"name": "mine", "tab": {"background": "accent"}}]}`, "mine", true, nil, false},
+		{"a theme of the user named like a built-in one", `{"theme": "dark", "themes": [{"name": "dark", "window": {"applicationTheme": "system"}}]}`, "dark", false, nil, false},
 		{"defaults override", `{"profiles": {"defaults": {"font": {"face": "Consolas"}, "opacity": 90, "environment": {}, "colorScheme": "Campbell"}, "list": []}}`,
 			"", false, []string{"colorScheme", "font", "environment"}, false},
 		{"stub present", `{"profiles": {"list": [{"guid": "{6B2D8B49-31D3-5DEA-9087-93C26E1A033E}", "hidden": false, "name": "Serena", "source": "SerenaTerminal"}]}}`,
