@@ -385,7 +385,7 @@ O [docs/support-matrix.md](docs/support-matrix.md) traz os detalhes, incluindo o
 
 O `sereno uninstall` retira as linhas de hook que acrescentou, apaga cada arquivo que gravou e que continua como ele gravou, e remove as pastas que criou. Um arquivo que você editou depois fica onde está e é informado (código de saída 4). O que ele não remove, e avisa quando é o caso:
 
-- a entrada que o próprio Windows Terminal acrescentou ao `settings.json` dele para o perfil Serena, e o identificador do perfil no `state.json` dele. O sereno não grava esses arquivos. Deixe a entrada: sem o fragmento, ela fica inativa e oculta;
+- a entrada que o próprio Windows Terminal acrescentou ao `settings.json` dele para o perfil Serena, e o identificador do perfil no `state.json` dele. O sereno não grava esses arquivos. Deixe a entrada: depois que o Windows Terminal for fechado e aberto de novo, o esperado é que ele tire o Serena do menu de nova aba e continue a listá-lo nas configurações, como um perfil que não é mais detectado (lido no código-fonte da versão 1.24, ainda não visto);
 - o programa sereno;
 - a pasta `bin` dentro da pasta do sereno, quando foi o script de instalação que colocou o programa ali;
 - o backup de um arquivo de inicialização que você alterou depois que a linha de hook foi acrescentada.

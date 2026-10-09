@@ -385,7 +385,7 @@ Tier 1 means: the maintainer has it on his machine and it is tested there. Tier 
 
 `sereno uninstall` removes the hook lines it added, deletes every file it wrote that is still as it wrote it, and removes the folders it created. A file you edited afterwards is left where it is and reported (exit code 4). What it does not remove, and says so when it applies:
 
-- the entry Windows Terminal itself added for the Serena profile to its `settings.json`, and the profile's identifier in its `state.json`. sereno does not write those files. Leave the entry: once the fragment is gone it is inactive and hidden;
+- the entry Windows Terminal itself added for the Serena profile to its `settings.json`, and the profile's identifier in its `state.json`. sereno does not write those files. Leave the entry: once Windows Terminal has been closed and opened again, it is expected to leave Serena out of its new-tab menu and to go on listing it in its settings, as a profile that is no longer detected (read from the source code of version 1.24, not seen yet);
 - the sereno program;
 - the `bin` folder inside sereno's folder, when the install script placed the program there;
 - the backup of a start-up file that you changed after the hook line was added.
