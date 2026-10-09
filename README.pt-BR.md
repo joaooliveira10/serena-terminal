@@ -75,7 +75,7 @@ Por padrão, nenhum arquivo seu é editado. Só quando você pede com `--hook` o
 
 ```text
   append  C:\Users\user\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1
-          + if (Test-Path -LiteralPath "$env:LOCALAPPDATA\sereno\shell\init.ps1") { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook
+          + if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage' -and [System.IO.File]::Exists("$env:LOCALAPPDATA\sereno\shell\init.ps1")) { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook
   append  C:\Users\user\.bashrc
           + [ -r "$LOCALAPPDATA/sereno/shell/init.bash" ] && . "$LOCALAPPDATA/sereno/shell/init.bash" # sereno:hook
 ```

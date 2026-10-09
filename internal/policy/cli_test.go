@@ -14,6 +14,8 @@ import (
 
 	"github.com/joaooliveira10/serena-terminal/internal/cli"
 	"github.com/joaooliveira10/serena-terminal/internal/i18n"
+	"github.com/joaooliveira10/serena-terminal/internal/platform"
+	"github.com/joaooliveira10/serena-terminal/internal/target/shells"
 	"github.com/joaooliveira10/serena-terminal/internal/testenv"
 )
 
@@ -483,9 +485,27 @@ func TestTheBuiltProgramOnlyRunsInASandbox(t *testing.T) {
 	// files: `--shell auto` takes PowerShell 7 where pwsh.exe is on PATH, as
 	// it is on the Windows runners of CI, so the script has to ask the same
 	// question and must know both.
+	//
+	// test/shell/run.ps1 does not start the program: it carries the two
+	// PowerShell lines of R21 by hand and runs them in its sessions. They
+	// are taken from the function that writes them, so that the line the
+	// sessions prove to be quiet and to load no module is the line a profile
+	// gets.
+	hookLine := func(goos string, shell shells.Shell) string {
+		line, err := shells.HookLine(platform.Host{OS: goos}, shell, platform.Root{Default: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// As a single-quoted string of PowerShell.
+		return "'" + strings.ReplaceAll(line, "'", "''") + "'"
+	}
 	for script, lines := range map[string][]string{
+		"test/shell/run.ps1": {
+			"$hookLine = " + hookLine(platform.Linux, shells.Pwsh),
+			"$hookLine = " + hookLine(platform.Windows, shells.PowerShell),
+		},
 		"scripts/smoke.ps1": {
-			`'if (Test-Path -LiteralPath "$env:LOCALAPPDATA\sereno\shell\init.ps1") { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook'`,
+			`'if ($ExecutionContext.SessionState.LanguageMode -eq ''FullLanguage'' -and [System.IO.File]::Exists("$env:LOCALAPPDATA\sereno\shell\init.ps1")) { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook'`,
 			`'[ -r "$LOCALAPPDATA/sereno/shell/init.bash" ] && . "$LOCALAPPDATA/sereno/shell/init.bash" # sereno:hook'`,
 			`'fragment\auto-soft.json'`,
 			`if (Get-Command pwsh.exe -CommandType Application -ErrorAction SilentlyContinue) { $wantedFragment = 'fragment\pwsh.json' }`,
@@ -497,7 +517,7 @@ func TestTheBuiltProgramOnlyRunsInASandbox(t *testing.T) {
 		text := read(script)
 		for _, line := range lines {
 			if !strings.Contains(text, line) {
-				t.Errorf("%s does not compare what the program writes for the default folder with %s", script, line)
+				t.Errorf("%s does not hold, letter for letter, what the program writes for the default folder: %s", script, line)
 			}
 		}
 	}

@@ -194,7 +194,7 @@ func (s *site) hookLine(shell string) string {
 		}
 		return line
 	case shell == "powershell" || shell == "pwsh":
-		return `if (Test-Path -LiteralPath "$env:LOCALAPPDATA\sereno\shell\init.ps1") { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook`
+		return `if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage' -and [System.IO.File]::Exists("$env:LOCALAPPDATA\sereno\shell\init.ps1")) { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook`
 	case s.machine.os == platform.Windows:
 		return `[ -r "$LOCALAPPDATA/sereno/shell/init.` + shell + `" ] && . "$LOCALAPPDATA/sereno/shell/init.` + shell + `" # sereno:hook`
 	}

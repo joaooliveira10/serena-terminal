@@ -16,7 +16,7 @@ import (
 // line belongs to which system is tested in internal/target/shells.
 const (
 	bashLine = `[ -r "$HOME/.local/share/sereno/shell/init.bash" ] && . "$HOME/.local/share/sereno/shell/init.bash" # sereno:hook`
-	psLine   = `if (Test-Path -LiteralPath "$env:LOCALAPPDATA\sereno\shell\init.ps1") { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook`
+	psLine   = `if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage' -and [System.IO.File]::Exists("$env:LOCALAPPDATA\sereno\shell\init.ps1")) { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook`
 	oldLine  = `[ -r '/opt/old place/sereno/shell/init.bash' ] && . '/opt/old place/sereno/shell/init.bash' # sereno:hook`
 )
 

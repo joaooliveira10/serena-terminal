@@ -126,7 +126,9 @@ const PolicyCommand = "Set-ExecutionPolicy -Scope CurrentUser RemoteSigned"
 var ErrRootNotASCII = errors.New("the path of sereno's folder is not printable ASCII")
 
 // HookLine returns the hook line of R21 for a shell: one ASCII line that tests
-// for the init file, sources it, and ends with the marker.
+// for the init file, sources it, and ends with the marker. The PowerShell
+// form names no cmdlet, so it loads no module, and it does nothing in a
+// session that is not in FullLanguage mode.
 //
 // With ROOT in its default place the line names it through the environment
 // ($env:LOCALAPPDATA, $LOCALAPPDATA or $HOME), so it is the same for every
@@ -164,7 +166,13 @@ func HookLine(host platform.Host, shell Shell, root platform.Root) (string, erro
 		test, source = quoted, quoted
 	}
 	if shell.isPowerShell() {
-		return "if (Test-Path -LiteralPath " + test + ") { . " + source + " } " + engine.HookMarker, nil
+		// Test-Path would be the first use of the module
+		// Microsoft.PowerShell.Management in a session and would load it
+		// before the first prompt, so the file is looked for with a method of
+		// .NET. Such a method cannot be called in ConstrainedLanguage mode,
+		// where the line would print an error at every start: it asks for the
+		// language mode first, as init.ps1 does (R23).
+		return "if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage' -and [System.IO.File]::Exists(" + test + ")) { . " + source + " } " + engine.HookMarker, nil
 	}
 	return "[ -r " + test + " ] && . " + source + " " + engine.HookMarker, nil
 }

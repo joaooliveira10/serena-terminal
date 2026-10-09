@@ -235,7 +235,7 @@ try {
     # letter: they name the folder through a variable of the session. Both
     # files are new, so the line is all they hold.
     $out = Invoke-Sereno @('apply', '--hook', $hooks, '--lang', 'en')
-    $line = 'if (Test-Path -LiteralPath "$env:LOCALAPPDATA\sereno\shell\init.ps1") { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook'
+    $line = 'if ($ExecutionContext.SessionState.LanguageMode -eq ''FullLanguage'' -and [System.IO.File]::Exists("$env:LOCALAPPDATA\sereno\shell\init.ps1")) { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook'
     Confirm (($script:code -eq 0) -and (Test-Path -LiteralPath $profilePath) -and ([IO.File]::ReadAllText($profilePath) -ceq ($line + "`r`n"))) 'apply --hook wrote the PowerShell hook line of the default folder, as R21 has it'
     if ($bash) {
         $line = '[ -r "$LOCALAPPDATA/sereno/shell/init.bash" ] && . "$LOCALAPPDATA/sereno/shell/init.bash" # sereno:hook'

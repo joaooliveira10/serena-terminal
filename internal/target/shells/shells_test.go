@@ -98,14 +98,14 @@ func TestHookLineDefaultRoot(t *testing.T) {
 		shell Shell
 		want  string
 	}{
-		{platform.Windows, PowerShell, `if (Test-Path -LiteralPath "$env:LOCALAPPDATA\sereno\shell\init.ps1") { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook`},
-		{platform.Windows, Pwsh, `if (Test-Path -LiteralPath "$env:LOCALAPPDATA\sereno\shell\init.ps1") { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook`},
+		{platform.Windows, PowerShell, `if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage' -and [System.IO.File]::Exists("$env:LOCALAPPDATA\sereno\shell\init.ps1")) { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook`},
+		{platform.Windows, Pwsh, `if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage' -and [System.IO.File]::Exists("$env:LOCALAPPDATA\sereno\shell\init.ps1")) { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook`},
 		{platform.Windows, Bash, `[ -r "$LOCALAPPDATA/sereno/shell/init.bash" ] && . "$LOCALAPPDATA/sereno/shell/init.bash" # sereno:hook`},
 		{platform.Windows, Zsh, `[ -r "$LOCALAPPDATA/sereno/shell/init.zsh" ] && . "$LOCALAPPDATA/sereno/shell/init.zsh" # sereno:hook`},
 		{platform.Linux, Bash, `[ -r "$HOME/.local/share/sereno/shell/init.bash" ] && . "$HOME/.local/share/sereno/shell/init.bash" # sereno:hook`},
 		{platform.Darwin, Zsh, `[ -r "$HOME/.local/share/sereno/shell/init.zsh" ] && . "$HOME/.local/share/sereno/shell/init.zsh" # sereno:hook`},
-		{platform.Linux, Pwsh, `if (Test-Path -LiteralPath "$HOME/.local/share/sereno/shell/init.ps1") { . "$HOME/.local/share/sereno/shell/init.ps1" } # sereno:hook`},
-		{platform.Darwin, Pwsh, `if (Test-Path -LiteralPath "$HOME/.local/share/sereno/shell/init.ps1") { . "$HOME/.local/share/sereno/shell/init.ps1" } # sereno:hook`},
+		{platform.Linux, Pwsh, `if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage' -and [System.IO.File]::Exists("$HOME/.local/share/sereno/shell/init.ps1")) { . "$HOME/.local/share/sereno/shell/init.ps1" } # sereno:hook`},
+		{platform.Darwin, Pwsh, `if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage' -and [System.IO.File]::Exists("$HOME/.local/share/sereno/shell/init.ps1")) { . "$HOME/.local/share/sereno/shell/init.ps1" } # sereno:hook`},
 	}
 	for _, test := range tests {
 		got, err := HookLine(host(test.os, nil), test.shell, root)
@@ -147,7 +147,7 @@ func TestHookLineCustomRoot(t *testing.T) {
 			}
 			want := "[ -r " + test.path + " ] && . " + test.path + " # sereno:hook"
 			if test.shell.isPowerShell() {
-				want = "if (Test-Path -LiteralPath " + test.path + ") { . " + test.path + " } # sereno:hook"
+				want = "if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage' -and [System.IO.File]::Exists(" + test.path + ")) { . " + test.path + " } # sereno:hook"
 			}
 			if got != want {
 				t.Errorf("\n got %s\nwant %s", got, want)
@@ -297,7 +297,7 @@ func TestResolvePowerShellOnWindows(t *testing.T) {
 			if hook.Path != profile || !hook.NewFileCRLF || hook.Shell != string(shell) || !hook.CreateNote.IsZero() {
 				t.Errorf("%s: hook = %+v", shell, hook)
 			}
-			if !strings.HasPrefix(hook.Line, `if (Test-Path -LiteralPath "$env:LOCALAPPDATA\sereno\shell\init.ps1")`) {
+			if !strings.HasPrefix(hook.Line, `if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage' -and [System.IO.File]::Exists("$env:LOCALAPPDATA\sereno\shell\init.ps1"))`) {
 				t.Errorf("%s: line = %s", shell, hook.Line)
 			}
 		}

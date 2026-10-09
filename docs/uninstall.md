@@ -18,7 +18,7 @@ sereno dev: plan
           - [ -r "$LOCALAPPDATA/sereno/shell/init.bash" ] && . "$LOCALAPPDATA/sereno/shell/init.bash" # sereno:hook
   remove  C:\Users\user\AppData\Local\sereno\backups\bash-27d68d07becf90a4.bak
   replace C:\Users\user\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1 (hook line removed)
-          - if (Test-Path -LiteralPath "$env:LOCALAPPDATA\sereno\shell\init.ps1") { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook
+          - if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage' -and [System.IO.File]::Exists("$env:LOCALAPPDATA\sereno\shell\init.ps1")) { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook
   remove  C:\Users\user\AppData\Local\sereno\backups\powershell-4071979914a35c40.bak
   remove  C:\Users\user\AppData\Local\Microsoft\Windows Terminal\Fragments\SerenaTerminal\sereno.json
   remove  C:\Users\user\AppData\Local\sereno\shell\init.bash

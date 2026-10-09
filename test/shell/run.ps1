@@ -114,10 +114,10 @@ $userHome = Join-Path $tmp 'home'
 # %LOCALAPPDATA%\sereno on Windows, ~/.local/share/sereno elsewhere.
 $dataHome = Join-Path $userHome '.local/share'
 $root = Join-Path $dataHome 'sereno'
-$hookLine = 'if (Test-Path -LiteralPath "$HOME/.local/share/sereno/shell/init.ps1") { . "$HOME/.local/share/sereno/shell/init.ps1" } # sereno:hook'
+$hookLine = 'if ($ExecutionContext.SessionState.LanguageMode -eq ''FullLanguage'' -and [System.IO.File]::Exists("$HOME/.local/share/sereno/shell/init.ps1")) { . "$HOME/.local/share/sereno/shell/init.ps1" } # sereno:hook'
 if ($onWindows) {
     $root = Join-Path $userHome 'local\sereno'
-    $hookLine = 'if (Test-Path -LiteralPath "$env:LOCALAPPDATA\sereno\shell\init.ps1") { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook'
+    $hookLine = 'if ($ExecutionContext.SessionState.LanguageMode -eq ''FullLanguage'' -and [System.IO.File]::Exists("$env:LOCALAPPDATA\sereno\shell\init.ps1")) { . "$env:LOCALAPPDATA\sereno\shell\init.ps1" } # sereno:hook'
 }
 $emptyPath = Join-Path $tmp 'empty-path'
 $sessionDir = Join-Path $tmp 'sessions'
@@ -951,6 +951,83 @@ try {
         Check ((Test-Path variable:global:__sereno) -and ($global:__sereno['Settings'][1] -ceq 'vivid')) 'and loads init.ps1 from ROOT in its default place'
         CheckEqual (Capture { prompt }).Console (Palette 'dark-vivid') 'and the session behaves like any other'
         Check ($Error.Count -eq 0) 'and nothing failed' ($(if ($Error.Count) { [string]$Error[0] }))
+    }
+
+    # R21 and R23: the same line in a session that an application control
+    # policy has constrained. The line looks for the file with a method of
+    # .NET, and such a method cannot be called there: a line that tried would
+    # print an error at every start of PowerShell. So it asks for the language
+    # mode first, as init.ps1 does, and then does nothing. The profile is
+    # written before the mode is set; from that line on this script is
+    # constrained too, so it reports with plain strings, and anything the
+    # line printed would be a line of this session that is not a check.
+    Invoke-Session 'the hook line of R21 in ConstrainedLanguage mode' $profileSession $defaultMode {
+        $ErrorActionPreference = 'Continue'
+        $profileFile = Join-Path $T.Tmp 'profile-constrained.ps1'
+        [IO.File]::WriteAllText($profileFile, $env:SERENO_T_HOOK + "`r`n")
+        $there = [IO.File]::Exists($T.Init)
+        $errorsBefore = $Error.Count
+        $ExecutionContext.SessionState.LanguageMode = 'ConstrainedLanguage'
+        $output = @(. $profileFile)
+        if ($there) { 'ok - init.ps1 is where the hook line looks for it' } else { 'not ok - init.ps1 is where the hook line looks for it' }
+        if ([string]$ExecutionContext.SessionState.LanguageMode -ceq 'ConstrainedLanguage') { 'ok - the session is in ConstrainedLanguage mode' } else { 'not ok - the session is in ConstrainedLanguage mode' }
+        if ($Error.Count -eq $errorsBefore) { 'ok - in ConstrainedLanguage mode the hook line of R21 fails nowhere' } else { 'not ok - in ConstrainedLanguage mode the hook line of R21 fails nowhere'; '#   ' + ([string]$Error[0]).Replace("`n", ' ') }
+        if ($output.Count -eq 0) { 'ok - and returns nothing' } else { 'not ok - and returns nothing' }
+        if (-not (Test-Path variable:global:__sereno)) { 'ok - and does not load init.ps1' } else { 'not ok - and does not load init.ps1' }
+    }
+
+    # R21: the hook line loads no module. Test-Path, with which the line was
+    # first written, is the first use of Microsoft.PowerShell.Management in a
+    # session and loads that module before the first prompt; a method of .NET
+    # loads nothing. The sessions of this file cannot show the difference:
+    # their library calls Join-Path, a cmdlet of that module, before a body
+    # runs. This one is a child with a script of its own, which names no
+    # cmdlet of the module before it loads a profile that holds the line:
+    # once with sereno's files where the line looks for them, once in a home
+    # that has none.
+    if (-not $Only -or 'the hook line of R21 loads no module'.Contains($Only)) {
+        [Console]::Out.WriteLine('# session: the hook line of R21 loads no module')
+        [IO.File]::WriteAllText($modeFile, $defaultMode)
+        $hooked = Join-Path $sessionDir 'hooked-profile.ps1'
+        [IO.File]::WriteAllText($hooked, $hookLine + "`r`n")
+        $probe = Join-Path $sessionDir 'modules-probe.ps1'
+        [IO.File]::WriteAllText($probe, @'
+$modules = { $names = [string[]]@(Get-Module | ForEach-Object { $_.Name }); [Array]::Sort($names); $names -join ',' }
+$before = & $modules
+. $env:SERENO_T_PROFILE
+$lines = @(('before=' + $before), ('after=' + (& $modules)))
+$lines += 'sereno=' + ($null -ne $ExecutionContext.SessionState.PSVariable.GetValue('global:__sereno'))
+$lines += 'errors=' + $Error.Count
+[IO.File]::WriteAllLines($env:SERENO_T_REPORT, [string[]]$lines)
+'@)
+        $report = Join-Path $tmp 'modules-report.txt'
+        $arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $probe + '"'
+        if (-not $onWindows) { $arguments = '-NoLogo -NoProfile -NonInteractive -File "' + $probe + '"' }
+        $bare = Join-Path $tmp 'home-without-sereno'
+        $null = New-Item -ItemType Directory -Path $bare -Force
+        $places = [ordered]@{
+            'with the files of sereno in place' = @(@{ }, 'True')
+            'in a home without the files of sereno' = @(@{ HOME = $bare; USERPROFILE = $bare; LOCALAPPDATA = $bare }, 'False')
+        }
+        $told = $true
+        foreach ($place in $places.Keys) {
+            if (-not $told) { break }
+            if (Test-Path -LiteralPath $report) { Remove-Item -LiteralPath $report -Force }
+            $child = Start-Child $arguments ($profileSession + $places[$place][0] + @{ SERENO_T_PROFILE = $hooked; SERENO_T_REPORT = $report }) (Join-Path $userHome 'work')
+            $found = @{ before = '<no report>'; after = '<no report>'; sereno = '<no report>'; errors = '<no report>' }
+            if (Test-Path -LiteralPath $report) { foreach ($line in [IO.File]::ReadAllLines($report)) { $pair = $line.Split([char[]]'=', 2); if ($pair.Count -eq 2) { $found[$pair[0]] = $pair[1] } } }
+            $loadedBefore = (',' + $found['before'] + ',').Contains(',Microsoft.PowerShell.Management,')
+            if ($loadedBefore -and ($PSVersionTable.PSVersion.Major -gt 5)) {
+                # Nothing can be told where the module is there from the start.
+                Report "skip - the hook line of R21 loads no module: PowerShell $($PSVersionTable.PSVersion) has Microsoft.PowerShell.Management loaded before a profile runs ($($found['before']))"
+                $told = $false
+                continue
+            }
+            Check (-not $loadedBefore -and $found['before'] -ne '<no report>') "$place`: before the profile runs, the session has not loaded Microsoft.PowerShell.Management" ("loaded before: " + $found['before'])
+            Check ($found['after'] -ceq $found['before']) "$place`: the profile with the hook line loads no module" ("loaded before: [" + $found['before'] + "], after: [" + $found['after'] + "]")
+            Check (($found['sereno'] -ceq $places[$place][1]) -and ($found['errors'] -ceq '0')) "$place`: init.ps1 was loaded ($($places[$place][1])), and nothing failed" ("loaded: " + $found['sereno'] + ", errors: " + $found['errors'])
+            Check ($child.Code -eq 0 -and $child.Err.Trim() -eq '' -and $child.Out.Trim() -eq '') "$place`: and the session prints nothing and ends without an error" ("exit code $($child.Code): " + $child.Err.Trim() + ' ' + $child.Out.Trim())
+        }
     }
 
     # R23: only the console host.
