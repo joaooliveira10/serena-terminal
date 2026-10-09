@@ -1,6 +1,6 @@
 # ADR 0003: The session sends the palette in band
 
-Status: accepted, 2026-10-07, with a fallback that is still open. Requirements R28 to R30 of [the specification](../spec-0.1.md) are the binding text.
+Status: accepted, 2026-10-07. Its fallback is not taken: on 2026-10-08 Windows Terminal was seen on a screen to honour the sequences, for one palette (see the consequences). Requirements R28 to R30 of [the specification](../spec-0.1.md) are the binding text.
 
 ## Context
 
@@ -24,5 +24,5 @@ Terminals accept colour changes from the program running inside them, through es
 - A change shows at the next prompt, not while the shell is idle.
 - The first frame of a new tab is the emulator's choice, and an open tab that Windows Terminal resets by itself stays reset until the variant changes or `sereno theme` is run in it.
 - The same bytes give `sereno theme --paint VARIANT`: a way to try a palette in any terminal that accepts the sequences, with nothing installed.
-- The route rests on Windows Terminal honouring the sequences, including for the background of the whole window. That has been read in its source, not seen on a screen. A short trial on the maintainer's machine is planned before the release. If it fails, the fallback is already part of the design: ship with `inband=off` as the default, and follow the system through the scheme pair only.
+- The route rests on Windows Terminal honouring the sequences, including for the background of the whole window. That was first read in its source. On 2026-10-08 it was seen on a screen once: the maintainer ran `sereno theme --paint light` in an open tab of Windows Terminal 1.24 on his machine, and the tab turned light. The fallback that was part of the design in case this failed (ship with `inband=off` as the default, and follow the system through the scheme pair only) is therefore not taken. Still to be seen, in the acceptance test: the two high-contrast palettes, the reset, and a session that sends the palette by itself.
 - macOS and Linux have no detection in 0.1, so nothing is sent in band there; the emulator's own light and dark pair is the route.

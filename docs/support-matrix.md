@@ -67,7 +67,7 @@ The program is tested with Go 1.27. `go.mod` allows Go 1.24 and newer; a CI job 
 ### Windows Terminal
 
 - **Detection.** Windows Terminal counts as present when one of three folders exists below `%LOCALAPPDATA%`: `Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState`, `Packages\Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe\LocalState`, or `Microsoft\Windows Terminal`. Without one, no fragment is written (the plan says so) and `sereno status` warns with `wt.not-detected`.
-- **Versions.** The fragment uses only keys that exist in the profile schema of Windows Terminal 1.24. Nothing has been looked at in any version yet; versions older than 1.24 are not going to be checked.
+- **Versions.** The fragment uses only keys that exist in the profile schema of Windows Terminal 1.24. The one thing seen on a screen so far, an open tab repainted (see the top of this page), was in 1.24.12741.0; the profile and the colour schemes of the fragment have not been looked at in any version yet. Versions older than 1.24 are not going to be checked.
 - **Its own theme setting** decides whether the dark/light scheme pair follows Windows; see the README. sereno does not change it.
 - **Its own settings file.** Windows Terminal adds an entry for the Serena profile to its `settings.json` the first time it sees the profile. sereno neither writes nor removes that entry; see [uninstall.md](uninstall.md).
 - **Your defaults win.** If your `settings.json` sets a colour scheme, a font or an environment for all profiles (`profiles.defaults`), that takes precedence over what the Serena profile asks for. `sereno status` warns with `wt.defaults-override`.
