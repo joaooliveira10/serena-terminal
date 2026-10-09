@@ -4,6 +4,7 @@
             "guid": <% json .GUID %>,
             "name": <% json .Name %>,
             "commandline": <% json .CommandLine %>,
+            "startingDirectory": "%USERPROFILE%",
             "colorScheme": <% if .Scheme %><% json .Scheme %><% else %>{
                 "dark": <% json .SchemeDark %>,
                 "light": <% json .SchemeLight %>

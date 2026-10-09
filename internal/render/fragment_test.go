@@ -106,7 +106,7 @@ var (
 		"black", "red", "green", "yellow", "blue", "purple", "cyan", "white",
 		"brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue", "brightPurple", "brightCyan", "brightWhite",
 	}
-	profileKeys = []string{"guid", "name", "commandline", "colorScheme", "font", "environment", "autoMarkPrompts", "showMarksOnScrollbar"}
+	profileKeys = []string{"guid", "name", "commandline", "startingDirectory", "colorScheme", "font", "environment", "autoMarkPrompts", "showMarksOnScrollbar"}
 )
 
 // fragmentVariations are the option sets whose output the shape tests look at.
@@ -239,6 +239,14 @@ func TestFragmentProfile(t *testing.T) {
 	const command = `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoLogo -NoExit -ExecutionPolicy RemoteSigned -File "%LOCALAPPDATA%\sereno\shell\init.ps1"`
 	if got := text(profile.fields["commandline"]); got != command {
 		t.Errorf("commandline = %q\n        want %q", got, command)
+	}
+	// Windows Terminal has no default for the starting folder: a profile
+	// without the key starts where the window was started from, which for
+	// one opened from the Start menu is the System32 folder of Windows. The
+	// home folder is named through the environment, as its own profiles do,
+	// so the file stays the same for every user.
+	if got := text(profile.fields["startingDirectory"]); got != "%USERPROFILE%" {
+		t.Errorf("startingDirectory = %q, want %q", got, "%USERPROFILE%")
 	}
 	scheme := profile.fields["colorScheme"]
 	if !reflect.DeepEqual(scheme.keys, []string{"dark", "light"}) || text(scheme.fields["dark"]) != "Serena Dark" || text(scheme.fields["light"]) != "Serena Light" {

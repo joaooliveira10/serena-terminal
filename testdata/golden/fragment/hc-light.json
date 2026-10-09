@@ -4,6 +4,7 @@
             "guid": "{6b2d8b49-31d3-5dea-9087-93c26e1a033e}",
             "name": "Serena",
             "commandline": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoLogo -NoExit -ExecutionPolicy RemoteSigned -File \"%LOCALAPPDATA%\\sereno\\shell\\init.ps1\"",
+            "startingDirectory": "%USERPROFILE%",
             "colorScheme": "Serena High Contrast Light",
             "font": {
                 "face": "Cascadia Code"

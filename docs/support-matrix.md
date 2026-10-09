@@ -73,6 +73,7 @@ The program is tested with Go 1.27. `go.mod` allows Go 1.24 and newer; a CI job 
 - **Its own settings file.** Windows Terminal adds an entry for the Serena profile to its `settings.json` the first time it sees the profile. sereno neither writes nor removes that entry; see [uninstall.md](uninstall.md).
 - **Your defaults win.** Whatever your `settings.json` sets for all profiles (`profiles.defaults`) takes precedence over what the Serena profile asks for: that is how Windows Terminal 1.24 layers a profile that comes from a fragment, as read in its source. `sereno status` looks for three such settings, a colour scheme, a font and an environment, and warns with `wt.defaults-override`; any other key set there wins as well and is not reported.
 - **The font** named by the profile is Cascadia Code, which comes with Windows Terminal. sereno installs no font.
+- **Where a Serena tab starts.** The profile names your home folder (`%USERPROFILE%`) as its starting folder, as Windows Terminal's own profiles do, so a Serena tab is expected to start there; `wt -p Serena -d FOLDER` chooses another folder. Without that key a tab would start in the folder of whatever started Windows Terminal, which for a window opened from the Start menu is the System32 folder of Windows, by Windows Terminal's source code and Microsoft's documentation. Not seen yet.
 - **Windows without Windows Terminal**: the classic console window gets the prompt and the line-editor colours through a hook line, and no palette.
 
 ### Hook lines
