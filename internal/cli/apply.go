@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -121,9 +122,14 @@ func runApply(r *run, p parsed) int {
 		}
 		options.Hooks = append(options.Hooks, string(shell))
 		prober := r.env.Prober
-		if record, ok := s.manifest.Hook(string(shell)); ok && !named[shell] {
+		if record, ok := s.manifest.Hook(string(shell)); ok && !named[shell] && isThere(record.Path) {
 			// A hook of an earlier apply is looked after where that apply
 			// put it: the manifest names the file, and nothing is started.
+			// Only while that file is there, though. When it is gone, the
+			// Documents folder may have moved, with the profile and its
+			// hook line in it, and making the old file again would put a
+			// line where PowerShell does not read: PowerShell is then asked
+			// as if the shell had been named.
 			prober = shells.Recorded(record.Path)
 		}
 		hook, refusal, err := shells.Resolve(host, shell, s.root, prober)
@@ -182,6 +188,14 @@ func runApply(r *run, p parsed) int {
 	r.closePlan(plan, false, r.T("plan.incomplete"))
 	r.applyNotices(facts)
 	return code
+}
+
+// isThere reports whether something stands at a path: a file, or anything
+// else, which the engine then judges (R22). A path that cannot be looked at
+// counts as not there, and so does a link that leads nowhere.
+func isThere(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // applyFacts is what the sentences after an apply depend on.

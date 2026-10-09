@@ -177,7 +177,7 @@ Nada a fazer: nenhum arquivo foi gravado.
 | `--keys profile\|always\|off` | Onde valem as teclas de conforto do PSReadLine: no perfil Serena, em toda sessão ou nunca. |
 | `--prompt on\|off` | O prompt Serena: caminho, branch, resultado do último comando. |
 
-As opções que você não informa continuam com o valor do apply anterior. Isso vale para `--no-profile` (para ter o perfil de volta: `sereno uninstall` e depois `sereno apply`) e para as linhas de hook: um hook pedido uma vez é conferido em todo apply seguinte, no arquivo em que foi colocado (o PowerShell só é consultado de novo quando você o indica outra vez em `--hook`), e `sereno uninstall --hook LIST` o retira.
+As opções que você não informa continuam com o valor do apply anterior. Isso vale para `--no-profile` (para ter o perfil de volta: `sereno uninstall` e depois `sereno apply`) e para as linhas de hook: um hook pedido uma vez é conferido em todo apply seguinte, no arquivo em que foi colocado (o PowerShell só é consultado de novo quando você o indica outra vez em `--hook`, ou quando esse arquivo não existe mais), e `sereno uninstall --hook LIST` o retira.
 
 ### uninstall
 
