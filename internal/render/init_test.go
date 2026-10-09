@@ -478,7 +478,8 @@ func TestPromptTemplates(t *testing.T) {
 	}
 	// The plain console of R26: decided once, outside Windows Terminal and VS
 	// Code, by the background the console names. There no colour of R24 is
-	// set and the prompt is its text. The three conditions are pinned as the
+	// set, no style of R25 (b) is rewritten and the prompt is its text. The
+	// three conditions are pinned as the
 	// lines of that decision, each with its indentation: the one about VS
 	// Code also stands, inside a longer line, where a session of Windows
 	// Terminal is recognised, and the one about Windows in other places.
@@ -491,6 +492,7 @@ func TestPromptTemplates(t *testing.T) {
 		`$background = $Host.UI.RawUI.BackgroundColor`,
 		`if ($null -ne $background) { if (-not ([string]$background -ceq 'Black')) { $s['Plain'] = $true } }`,
 		`if ($s['Plain']) { }`,
+		`if (-not $s['Plain']) { & $s['Styles'] $style }`,
 		`$out += $path`,
 		`if ($branch) { $out += ' ' + $branch }`,
 		`if ($plain) { $out += ' ' + $took } else {`,

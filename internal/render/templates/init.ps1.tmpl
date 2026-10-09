@@ -228,7 +228,8 @@ $global:__sereno = @{
     # colour table. Where that entry is not black, a slot colour is one
     # entry of the table on another: the window of Windows PowerShell has
     # entry 5 as its background, the slot of the keyword and of the branch.
-    # Such a console keeps the colours it has, and the prompt has none.
+    # Such a console keeps the colours it has, the styles of $PSStyle
+    # included, and the prompt has none.
     try {
         if ($env:OS -ceq 'Windows_NT') {
             if (-not $env:WT_SESSION) {
@@ -338,8 +339,11 @@ $global:__sereno = @{
                 if ($null -ne $back) { $private.ProgressForegroundColor = $text; $private.ProgressBackgroundColor = $back }
             }
         } else {
-            # $PSStyle: the styles that paint a background lose it.
-            & $s['Styles'] $style
+            # $PSStyle: the styles that paint a background lose it. Not in
+            # a plain console: a style that paints its own background does
+            # not stand on the one of the console, and the text colour of
+            # the same slot would, as one entry of the table on another.
+            if (-not $s['Plain']) { & $s['Styles'] $style }
         }
     } catch {}
 

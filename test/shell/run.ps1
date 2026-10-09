@@ -696,10 +696,36 @@ try {
     # its colour table is its background, so ESC[35m is text in the colour it
     # stands on, and ESC[34m is dark blue on dark blue. There a slot colour
     # is one entry of the table on another, and init.ps1 writes none.
+    #
+    # R25 (b) is part of that: the styles of $PSStyle that paint a background
+    # stay as they are. The one PowerShell 7 ships with, bold on blue for
+    # directories, would become blue text on the background of the console.
+    # Under PowerShell 7 the $PSStyle of the session is looked at, with
+    # styles as a profile may have left them; Windows PowerShell has none,
+    # and one session gives it an object of the same shape (SERENO_T_STYLE).
     if ($onWindows) {
         $plainConsole = {
             $Host.UI.RawUI.BackgroundColor = $env:SERENO_T_BACKGROUND
             CheckEqual ([string]$Host.UI.RawUI.BackgroundColor) $env:SERENO_T_BACKGROUND 'the console of this session names the background it was given'
+            $styled = (Test-Path variable:PSStyle)
+            if ((-not $styled) -and ($env:SERENO_T_STYLE -ceq 'simulated')) {
+                $global:PSStyle = [pscustomobject]@{
+                    Progress = [pscustomobject]@{ Style = '' }
+                    Formatting = [pscustomobject]@{ TableHeader = '' }
+                    FileInfo = [pscustomobject]@{ Directory = $E + '[44;1m'; SymbolicLink = ''; Executable = ''; Extension = (New-Object 'System.Collections.Generic.Dictionary[string,string]') }
+                }
+                $styled = $true
+            }
+            $styles = { '' }
+            if ($styled) {
+                $PSStyle.Progress.Style = $E + '[1;103m'
+                $PSStyle.Formatting.TableHeader = $E + '[102;30m'
+                $PSStyle.FileInfo.SymbolicLink = $E + '[48;5;44;41m'
+                $PSStyle.FileInfo.Executable = $E + '[01;044m'
+                $PSStyle.FileInfo.Extension['.odd'] = $E + '[41;97m'
+                $styles = { Show (@($PSStyle.Progress.Style, $PSStyle.Formatting.TableHeader, $PSStyle.FileInfo.Directory, $PSStyle.FileInfo.SymbolicLink, $PSStyle.FileInfo.Executable, $PSStyle.FileInfo.Extension['.odd']) -join ' ') }
+            }
+            $stylesBefore = & $styles
             $names = 'CommandColor', 'KeywordColor', 'StringColor', 'NumberColor', 'TypeColor', 'MemberColor', 'VariableColor', 'ParameterColor', 'OperatorColor',
                 'CommentColor', 'ErrorColor', 'EmphasisColor', 'SelectionColor', 'DefaultTokenColor', 'ContinuationPromptColor'
             $colours = { $options = Get-PSReadLineOption; @(foreach ($name in $names) { $name + '=' + (Show ([string]$options.$name)) }) -join ' ' }
@@ -708,6 +734,10 @@ try {
             Check ($run.Console -eq '' -and $run.Output.Count -eq 0 -and $Error.Count -eq 0) 'init.ps1 prints nothing there and nothing in it fails' ($(if ($Error.Count) { [string]$Error[0] }))
             Check ($global:__sereno['Plain'] -and -not $global:__sereno['Terminal']) 'the session knows that it writes no colour'
             CheckEqual (& $colours) $before 'the line editor keeps the fifteen colours it had'
+            if ($styled) {
+                CheckEqual (& $styles) $stylesBefore 'a $PSStyle keeps every style it had, those that paint a background too'
+                CheckEqual $PSStyle.FileInfo.Directory ($E + '[44;1m') 'and directories stay as PowerShell lists them, bold on a blue background'
+            }
             Go 'repo'
             $shown = '~' + $T.Sep + 'repo feature/x'
             $run = Capture { prompt; Write-Error 'failed on purpose' -ErrorAction SilentlyContinue; prompt }
@@ -729,6 +759,9 @@ try {
         }
         Invoke-Session 'console of Windows with the background of Windows PowerShell' @{ SERENO_OS_MODE = 'dark'; SERENO_T_BACKGROUND = 'DarkMagenta' } $defaultMode $plainConsole
         Invoke-Session 'console of Windows with a light background' @{ SERENO_SESSION = 'wt-profile'; SERENO_OS_MODE = 'light'; SERENO_T_BACKGROUND = 'White' } "mode=auto`nflavor=soft`ninband=always`nkeys=always`nprompt=on`n" $plainConsole
+        if (-not (Test-Path variable:PSStyle)) {
+            Invoke-Session 'console of Windows with the background of Windows PowerShell and a $PSStyle (simulated)' @{ SERENO_OS_MODE = 'dark'; SERENO_T_BACKGROUND = 'DarkMagenta'; SERENO_T_STYLE = 'simulated' } $defaultMode $plainConsole
+        }
     }
 
     Invoke-Session 'terminal of VS Code' @{ WT_SESSION = 'test-session'; SERENO_SESSION = 'wt-profile'; SERENO_OS_MODE = 'light'; TERM_PROGRAM = 'vscode' } $defaultMode {
@@ -934,7 +967,10 @@ try {
     if (-not (Test-Path variable:PSStyle)) {
         Invoke-Session 'PowerShell with $PSStyle (simulated)' @{ SERENO_OS_MODE = 'dark' } $defaultMode {
             # Windows PowerShell has no $PSStyle. An object of the same
-            # shape lets the rule of R25 for PowerShell 7 run here too.
+            # shape lets the rule of R25 for PowerShell 7 run here too. The
+            # rule is not for a plain console, so the console of this
+            # session is given a black background first.
+            if ($T.Windows) { $Host.UI.RawUI.BackgroundColor = 'Black' }
             $extension = New-Object 'System.Collections.Generic.Dictionary[string,string]'
             $extension['.zip'] = $E + '[31;1m'; $extension['.odd'] = $E + '[41;97m'
             $global:PSStyle = [pscustomobject]@{
@@ -967,7 +1003,10 @@ try {
         Invoke-Session 'a $PSStyle with styles of the user' @{ SERENO_OS_MODE = 'dark' } $defaultMode {
             # The $PSStyle of this PowerShell, as a profile may have left it
             # before init.ps1 runs: backgrounds in each of the places R25
-            # names. Only this process is changed.
+            # names. Only this process is changed. The rule is not for a
+            # plain console, so on Windows the console of this session is
+            # given a black background first.
+            if ($T.Windows) { $Host.UI.RawUI.BackgroundColor = 'Black' }
             CheckEqual $PSStyle.FileInfo.Directory ($E + '[44;1m') 'PowerShell lists directories bold on a blue background: the one style init.ps1 knows as it stands'
             $PSStyle.Progress.Style = $E + '[1;103m'
             $PSStyle.Formatting.TableHeader = $E + '[102;30m'
