@@ -497,7 +497,17 @@ func TestMkdirRemoveFileRemoveEmptyDir(t *testing.T) {
 	if err := RemoveFile(file); err == nil {
 		t.Error("removing a missing file succeeded")
 	}
-	if removed, err := RemoveEmptyDir(dir); err != nil || !removed {
+	// On Windows a file that was just removed can still be listed for a
+	// moment, while a scanner holds it open: the directory is then not empty
+	// yet, and RemoveEmptyDir says so without an error. It is asked again for
+	// as long as the engine itself waits for such a directory
+	// (removeEmptiedDir); elsewhere it is asked once.
+	removed, err := RemoveEmptyDir(dir)
+	for deadline := time.Now().Add(patience); patient && err == nil && !removed && time.Now().Before(deadline); {
+		time.Sleep(2 * time.Millisecond)
+		removed, err = RemoveEmptyDir(dir)
+	}
+	if err != nil || !removed {
 		t.Errorf("RemoveEmptyDir on an empty directory = %v, %v; want true, nil", removed, err)
 	}
 	if removed, err := RemoveEmptyDir(dir); err != nil || removed {
