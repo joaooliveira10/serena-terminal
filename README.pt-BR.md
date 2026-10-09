@@ -69,9 +69,9 @@ O que são esses arquivos:
 | `sereno\manifest.json` | O registro de cada arquivo e pasta que o sereno gravou, com o SHA-256 de cada arquivo. É por ele que o `uninstall` se guia. |
 | `Fragments\SerenaTerminal\sereno.json` | Um fragmento para o Windows Terminal: o perfil "Serena" e os seis esquemas de cores. Só é gravado no Windows, e só quando o Windows Terminal é encontrado. |
 
-A pasta do sereno é `%LOCALAPPDATA%\sereno` no Windows e `~/.local/share/sereno` no macOS e no Linux (`$XDG_DATA_HOME/sereno` quando essa variável está definida). A variável `SERENO_HOME` muda a pasta de lugar. Outros comandos acrescentam coisas a ela: o `sereno export` grava `themes`, uma linha de hook cria `backups`, e enquanto um comando está gravando existe ali um arquivo vazio chamado `lock`.
+A pasta do sereno é `%LOCALAPPDATA%\sereno` no Windows e `~/.local/share/sereno` no macOS e no Linux (`$XDG_DATA_HOME/sereno` quando essa variável está definida). A variável `SERENO_HOME` muda a pasta de lugar. Outros comandos acrescentam coisas a ela: o `sereno export` grava `themes`, uma linha de hook num arquivo de inicialização que já existia cria `backups`, e enquanto um comando está gravando existe ali um arquivo vazio chamado `lock`.
 
-Por padrão, nenhum arquivo seu é editado. Só quando você pede com `--hook` o sereno acrescenta uma linha ao arquivo de inicialização de um shell, depois de copiar esse arquivo para `backups`:
+Por padrão, nenhum arquivo seu é editado. Só quando você pede com `--hook` o sereno acrescenta uma linha ao arquivo de inicialização de um shell. Um arquivo que já existe é antes copiado para `backups`, e o plano mostra `append`, como aqui; quando ainda não existe nenhum, o sereno cria o arquivo com essa única linha (o plano mostra `create`), e não há o que copiar:
 
 ```text
   append  C:\Users\user\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1

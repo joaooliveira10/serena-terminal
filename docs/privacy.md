@@ -35,7 +35,7 @@ Never: Windows Terminal's settings, the registry, `PATH`, an execution policy, a
 Everything stays on your machine, in sereno's own folder:
 
 - `manifest.json` holds the full paths of the files and folders sereno wrote (a path contains your user name), the SHA-256 of each file, and the options of the last apply. It holds no time stamp.
-- `backups` holds a **copy of each start-up file** sereno added a hook line to, as the file was before. Such a file can contain things you would not publish: tokens, internal host names, aliases. The copy gets permission bits no wider than the file it came from. Uninstall deletes it when the start-up file is back to its earlier content, and keeps it, and says so, when you changed the file in between. Keep this in mind if you copy or share sereno's folder.
+- `backups` holds a **copy of each start-up file** that already existed when sereno added a hook line to it, as the file was before. Such a file can contain things you would not publish: tokens, internal host names, aliases. The copy gets permission bits no wider than the file it came from. Uninstall deletes it when the start-up file is back to its earlier content, and keeps it, and says so, when you changed the file in between. Keep this in mind if you copy or share sereno's folder.
 
 ## The one program it may start
 

@@ -69,9 +69,9 @@ What those files are:
 | `sereno\manifest.json` | The record of every file and folder sereno wrote, with the SHA-256 of each file. `uninstall` goes by it. |
 | `Fragments\SerenaTerminal\sereno.json` | One fragment for Windows Terminal: the "Serena" profile and the six colour schemes. Written only on Windows, and only when Windows Terminal is found. |
 
-sereno's own folder is `%LOCALAPPDATA%\sereno` on Windows and `~/.local/share/sereno` on macOS and Linux (`$XDG_DATA_HOME/sereno` when that variable is set). The variable `SERENO_HOME` moves it. Later commands add to that folder: `sereno export` writes `themes`, a hook line adds `backups`, and while a command writes there is an empty file `lock`.
+sereno's own folder is `%LOCALAPPDATA%\sereno` on Windows and `~/.local/share/sereno` on macOS and Linux (`$XDG_DATA_HOME/sereno` when that variable is set). The variable `SERENO_HOME` moves it. Later commands add to that folder: `sereno export` writes `themes`, a hook line in a start-up file that was already there adds `backups`, and while a command writes there is an empty file `lock`.
 
-No file of yours is edited by default. Only when you ask with `--hook` does sereno add one line to the start-up file of a shell, after copying that file to `backups`:
+No file of yours is edited by default. Only when you ask with `--hook` does sereno add one line to the start-up file of a shell. A file that is already there is first copied to `backups`, and the plan shows `append`, as here; where there is none yet, sereno creates the file with that one line (the plan shows `create`), and there is nothing to copy:
 
 ```text
   append  C:\Users\user\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1

@@ -22,7 +22,7 @@ It can:
 
 - create, replace and delete files in its own folder (`%LOCALAPPDATA%\sereno`, or `~/.local/share/sereno`, or where `SERENO_HOME` points);
 - on Windows, create, replace and delete one file, `%LOCALAPPDATA%\Microsoft\Windows Terminal\Fragments\SerenaTerminal\sereno.json`;
-- when you pass `--hook`, append one line to the start-up file of a shell and later remove that line, keeping a copy of the file as it was;
+- when you pass `--hook`, append one line to the start-up file of a shell, creating the file and its folder when there is none, and later remove that line; a file that was already there is copied first, as it was;
 - when you pass `--hook powershell` or `--hook pwsh`, start that PowerShell once, to ask where its profile is;
 - write theme files into a folder you name with `sereno export --to`;
 - read three values of the current user's registry, Windows Terminal's two settings files, and the environment;
