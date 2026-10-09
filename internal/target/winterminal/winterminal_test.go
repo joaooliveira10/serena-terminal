@@ -218,6 +218,25 @@ func TestParseSettings(t *testing.T) {
 			}
 		})
 	}
+	// Each of the six built-in themes by its name: a theme of the user that
+	// takes one of those names is ignored by Windows Terminal, so what it
+	// says about following Windows does not count either way.
+	for name, follows := range map[string]bool{
+		"dark": false, "light": false, "legacyDark": false, "legacyLight": false,
+		"system": true, "legacySystem": true,
+	} {
+		says := "system"
+		if follows {
+			says = "dark"
+		}
+		s, err := ParseSettings([]byte(`{"theme": "` + name + `", "themes": [{"name": "` + name + `", "window": {"applicationTheme": "` + says + `"}}]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.Theme != name || s.FollowsSystem() != follows {
+			t.Errorf("a theme of the user named %q that says %q: theme %q, follows %v; want %q, %v", name, says, s.Theme, s.FollowsSystem(), name, follows)
+		}
+	}
 	for name, bad := range map[string]string{
 		"empty":                "",
 		"array":                `[]`,
