@@ -27,7 +27,9 @@ $global:__sereno = @{
     ModeFile = "$PSScriptRoot/../mode"; Stamp = [long]0; Settings = @('auto', 'soft', 'profile', 'profile', 'on')
     # Terminal: inside Windows Terminal and not in VS Code. Profile: started
     # from the Serena profile. Last: the variant painted last, if any.
-    Terminal = $false; Profile = $false; Last = ''
+    # Plain: a console window of Windows itself whose background is not
+    # black; no colour is written there.
+    Terminal = $false; Profile = $false; Last = ''; Plain = $false
     Shown = 0; HistoryId = [long]-1; Saved = $null; Bin = ''
     E = [string][char]27; Bel = [string][char]7
 
@@ -224,6 +226,22 @@ $global:__sereno = @{
         elseif ($env:WT_PROFILE_ID -cmatch '\A(?i)\{6b2d8b49-31d3-5dea-9087-93c26e1a033e\}\z') { $s['Profile'] = $true }
         & $s['Read']
     } catch {}
+    # A console window of Windows itself, outside Windows Terminal and VS
+    # Code, takes no palette, and its background is an entry of its own
+    # colour table. Where that entry is not black, a slot colour is one
+    # entry of the table on another: the window of Windows PowerShell has
+    # entry 5 as its background, the slot of the keyword and of the branch.
+    # Such a console keeps the colours it has, and the prompt has none.
+    try {
+        if ($env:OS -ceq 'Windows_NT') {
+            if (-not $env:WT_SESSION) {
+                if (-not ($env:TERM_PROGRAM -ceq 'vscode')) {
+                    $background = $Host.UI.RawUI.BackgroundColor
+                    if ($null -ne $background) { if (-not ([string]$background -ceq 'Black')) { $s['Plain'] = $true } }
+                }
+            }
+        }
+    } catch {}
     $settings = $s['Settings']
 
     # Line editor. PSReadLine is used only when the host already loaded it:
@@ -246,8 +264,10 @@ $global:__sereno = @{
                 # Colours through slots only. The fifteen keys PSReadLine has
                 # had since 2.0 go in together, the three of the prediction
                 # views each when its property exists. PSReadLine 1.x has no
-                # -Colors at all, and no CommandColor.
-                if ($type.GetProperty('CommandColor')) {
+                # -Colors at all, and no CommandColor. A plain console keeps
+                # the colours the line editor chose for it.
+                if ($s['Plain']) { }
+                elseif ($type.GetProperty('CommandColor')) {
                     $colors = @{
                         Command = "$e[34m"; Keyword = "$e[35m"; String = "$e[32m"
                         Number = "$e[93m"; Type = "$e[33m"; Member = "$e[36m"
@@ -408,8 +428,16 @@ $global:__sereno = @{
                         elseif (($path[$userHome.Length] -eq [char]92) -or ($path[$userHome.Length] -eq [char]47)) { $path = '~' + $path.Substring($userHome.Length) }
                     }
                 }
-                $out += "$e[34m" + $path + "$e[0m"
-                if ($branch) { $out += " $e[35m" + $branch + "$e[0m" }
+                # A plain console (see the start-up part) gets the text of
+                # the prompt and no colour.
+                $plain = $s['Plain']
+                if ($plain) {
+                    $out += $path
+                    if ($branch) { $out += ' ' + $branch }
+                } else {
+                    $out += "$e[34m" + $path + "$e[0m"
+                    if ($branch) { $out += " $e[35m" + $branch + "$e[0m" }
+                }
 
                 # How long the last command took, once, when it was 2 s or more.
                 $id = $MyInvocation.HistoryId
@@ -419,13 +447,19 @@ $global:__sereno = @{
                         $entry = Microsoft.PowerShell.Core\Get-History -Count 1
                         if ($entry) {
                             $seconds = ($entry.EndExecutionTime - $entry.StartExecutionTime).TotalSeconds
-                            if ($seconds -ge 2) { $out += " $e[90m" + $seconds.ToString('0.0', [System.Globalization.CultureInfo]::InvariantCulture) + "s$e[0m" }
+                            if ($seconds -ge 2) {
+                                $took = $seconds.ToString('0.0', [System.Globalization.CultureInfo]::InvariantCulture) + 's'
+                                if ($plain) { $out += ' ' + $took } else { $out += " $e[90m" + $took + "$e[0m" }
+                            }
                         }
                     }
                 }
 
-                if ($ok) { $out += "`n$e[32m" } else { $out += "`n$e[31m" }
-                $out += ('>' * ($nestedPromptLevel + 1)) + "$e[0m "
+                if ($plain) { $out += "`n" + ('>' * ($nestedPromptLevel + 1)) + ' ' }
+                else {
+                    if ($ok) { $out += "`n$e[32m" } else { $out += "`n$e[31m" }
+                    $out += ('>' * ($nestedPromptLevel + 1)) + "$e[0m "
+                }
                 if ($terminal) { $out += $e + ']133;B' + $s['Bel'] }
                 $s['Shown'] = $s['Shown'] + 1
                 $out

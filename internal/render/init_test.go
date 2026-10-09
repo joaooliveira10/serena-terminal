@@ -476,6 +476,26 @@ func TestPromptTemplates(t *testing.T) {
 			t.Errorf("init.ps1 does not contain %s", want)
 		}
 	}
+	// The plain console of R26: decided once, outside Windows Terminal and VS
+	// Code, by the background the console names. There no colour of R24 is
+	// set and the prompt is its text. The two conditions are pinned as the
+	// lines of that decision: the one about VS Code also stands, inside a
+	// longer line, where a session of Windows Terminal is recognised.
+	for _, want := range []string{
+		"\n            if (-not $env:WT_SESSION) {\n",
+		"\n                if (-not ($env:TERM_PROGRAM -ceq 'vscode')) {\n",
+		`$background = $Host.UI.RawUI.BackgroundColor`,
+		`if ($null -ne $background) { if (-not ([string]$background -ceq 'Black')) { $s['Plain'] = $true } }`,
+		`if ($s['Plain']) { }`,
+		`$out += $path`,
+		`if ($branch) { $out += ' ' + $branch }`,
+		`if ($plain) { $out += ' ' + $took } else {`,
+		"if ($plain) { $out += \"`n\" + ('>' * ($nestedPromptLevel + 1)) + ' ' }",
+	} {
+		if !strings.Contains(ps, want) {
+			t.Errorf("init.ps1 does not contain %s", want)
+		}
+	}
 	// The GUID of the Serena profile is how a session is recognised (R30).
 	const guid = "6b2d8b49-31d3-5dea-9087-93c26e1a033e"
 	if !strings.Contains(ps, `\{`+guid+`\}`) {

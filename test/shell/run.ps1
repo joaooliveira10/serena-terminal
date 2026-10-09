@@ -656,6 +656,9 @@ try {
 
     # -----------------------------------------------------------------------
     Invoke-Session 'hook session in Windows Terminal' @{ WT_SESSION = 'test-session'; SERENO_OS_MODE = 'light' } $defaultMode {
+        # Inside Windows Terminal the colour a console names as its
+        # background says nothing about the screen, and is not looked at.
+        if ($T.Windows) { $Host.UI.RawUI.BackgroundColor = 'DarkMagenta' }
         $before = Get-PSReadLineOption
         $bell = [string]$before.BellStyle; $moves = $before.HistorySearchCursorMovesToEnd
         $tab = [string](Get-PSReadLineKeyHandler | Where-Object { $_.Key -eq 'Tab' } | Select-Object -First 1).Function
@@ -671,13 +674,61 @@ try {
         CheckEqual (Capture { prompt }).Console (Palette 'light') 'the mode file turns to inband=always: this session paints from the next prompt on'
     }
 
+    # The console of a session of these tests is one of Windows itself, without
+    # a window, and it names a background like any other: the one Windows
+    # gives a console of that program (DarkMagenta for powershell.exe on the
+    # maintainer's machine, where the window of Windows PowerShell is blue).
+    # A session whose result depends on it sets it first; only that console,
+    # which ends with the session, is changed.
     Invoke-Session 'session outside Windows Terminal' @{ SERENO_SESSION = 'wt-profile'; SERENO_OS_MODE = 'light' } $defaultMode {
+        if ($T.Windows) { $Host.UI.RawUI.BackgroundColor = 'Black' }
         . $T.Init
         Go 'repo'
         $run = Capture { prompt; Write-Error 'failed on purpose' -ErrorAction SilentlyContinue; prompt }
         CheckEqual $run.Console '' 'without WT_SESSION nothing is painted'
         CheckEqual $run.Output[0] (Plain ('~' + $T.Sep + 'repo') 'feature/x') 'without WT_SESSION the prompt has no marks'
         CheckEqual $run.Output[1] (Plain ('~' + $T.Sep + 'repo') 'feature/x' -ok $false) 'without WT_SESSION the failed prompt has no marks either'
+        CheckEqual ([string](Get-PSReadLineOption).KeywordColor) ($E + '[35m') 'in a console with a black background the line editor has the colours of R24'
+    }
+
+    # R24 and R26: a console window of Windows itself whose background is not
+    # black. The window of Windows PowerShell is the known one: entry 5 of
+    # its colour table is its background, so ESC[35m is text in the colour it
+    # stands on, and ESC[34m is dark blue on dark blue. There a slot colour
+    # is one entry of the table on another, and init.ps1 writes none.
+    if ($onWindows) {
+        $plainConsole = {
+            $Host.UI.RawUI.BackgroundColor = $env:SERENO_T_BACKGROUND
+            CheckEqual ([string]$Host.UI.RawUI.BackgroundColor) $env:SERENO_T_BACKGROUND 'the console of this session names the background it was given'
+            $names = 'CommandColor', 'KeywordColor', 'StringColor', 'NumberColor', 'TypeColor', 'MemberColor', 'VariableColor', 'ParameterColor', 'OperatorColor',
+                'CommentColor', 'ErrorColor', 'EmphasisColor', 'SelectionColor', 'DefaultTokenColor', 'ContinuationPromptColor'
+            $colours = { $options = Get-PSReadLineOption; @(foreach ($name in $names) { $name + '=' + (Show ([string]$options.$name)) }) -join ' ' }
+            $before = & $colours
+            $run = Capture { . $T.Init }
+            Check ($run.Console -eq '' -and $run.Output.Count -eq 0 -and $Error.Count -eq 0) 'init.ps1 prints nothing there and nothing in it fails' ($(if ($Error.Count) { [string]$Error[0] }))
+            Check ($global:__sereno['Plain'] -and -not $global:__sereno['Terminal']) 'the session knows that it writes no colour'
+            CheckEqual (& $colours) $before 'the line editor keeps the fifteen colours it had'
+            Go 'repo'
+            $shown = '~' + $T.Sep + 'repo feature/x'
+            $run = Capture { prompt; Write-Error 'failed on purpose' -ErrorAction SilentlyContinue; prompt }
+            CheckEqual $run.Output[0] ($shown + $LF + '> ') 'the prompt is the text of R26 without a colour'
+            CheckEqual $run.Output[1] ($shown + $LF + '> ') 'and the same text after a failed command'
+            [pscustomobject]@{ CommandLine = 'wait'; ExecutionStatus = 'Completed'; StartExecutionTime = [datetime]'2026-01-01T10:00:00'; EndExecutionTime = [datetime]'2026-01-01T10:00:02.34' } | Add-History
+            $took = Capture { prompt }
+            CheckEqual $took.Text ($shown + ' 2.3s' + $LF + '> ') 'the duration is text without a colour too'
+            $global:NestedPromptLevel = 1
+            $nested = Capture { prompt }
+            $global:NestedPromptLevel = 0
+            CheckEqual $nested.Text ($shown + $LF + '>> ') 'a nested prompt shows >>'
+            Check (-not ($run.Text + $took.Text + $nested.Text).Contains($E)) 'no prompt of this session holds an escape character'
+            CheckEqual ($run.Console + $took.Console) '' 'and nothing is painted'
+            if (-not (Test-Path variable:PSStyle)) {
+                Check (($Host.PrivateData.ProgressForegroundColor -eq $Host.UI.RawUI.ForegroundColor) -and ([string]$Host.PrivateData.ProgressBackgroundColor -eq $env:SERENO_T_BACKGROUND)) 'the progress bar has the colours of this console, as R25 says' "$($Host.PrivateData.ProgressForegroundColor) on $($Host.PrivateData.ProgressBackgroundColor)"
+            }
+            $Error.Clear()
+        }
+        Invoke-Session 'console of Windows with the background of Windows PowerShell' @{ SERENO_OS_MODE = 'dark'; SERENO_T_BACKGROUND = 'DarkMagenta' } $defaultMode $plainConsole
+        Invoke-Session 'console of Windows with a light background' @{ SERENO_SESSION = 'wt-profile'; SERENO_OS_MODE = 'light'; SERENO_T_BACKGROUND = 'White' } "mode=auto`nflavor=soft`ninband=always`nkeys=always`nprompt=on`n" $plainConsole
     }
 
     Invoke-Session 'terminal of VS Code' @{ WT_SESSION = 'test-session'; SERENO_SESSION = 'wt-profile'; SERENO_OS_MODE = 'light'; TERM_PROGRAM = 'vscode' } $defaultMode {
@@ -685,6 +736,15 @@ try {
         $run = Capture { prompt; prompt }
         CheckEqual $run.Console '' 'TERM_PROGRAM=vscode: nothing is painted, Serena Theme owns the palette there'
         CheckEqual $run.Output[1] (Plain ('~' + $T.Sep + 'work')) 'TERM_PROGRAM=vscode: the prompt has no marks'
+    }
+
+    # VS Code started from the desktop has no WT_SESSION. Its terminal has a
+    # palette of its own, whatever its console names as a background.
+    Invoke-Session 'terminal of VS Code without WT_SESSION' @{ SERENO_OS_MODE = 'dark'; TERM_PROGRAM = 'vscode' } $defaultMode {
+        if ($T.Windows) { $Host.UI.RawUI.BackgroundColor = 'DarkMagenta' }
+        . $T.Init
+        CheckEqual ([string](Get-PSReadLineOption).KeywordColor) ($E + '[35m') 'TERM_PROGRAM=vscode alone: the line editor has the colours of R24'
+        CheckEqual (Capture { prompt }).Text (Plain ('~' + $T.Sep + 'work')) 'TERM_PROGRAM=vscode alone: the prompt has its colours and no marks'
     }
 
     # R25: a session that has no console any more has no colours to hand to

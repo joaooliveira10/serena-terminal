@@ -362,7 +362,7 @@ The limits, stated plainly. What sereno does is taken from its code and its test
 - **VS Code's terminal.** sereno never repaints there: the editor's colour theme owns the palette. With a hook line you get the prompt and the colours of the line editor, and the colours themselves come from the theme you chose in VS Code.
 - **macOS and Linux.** Version 0.1 does not detect the system's appearance there. `mode=auto` counts as dark, and nothing is repainted. The supported route is the light/dark pair of your emulator, with the theme files from `sereno export`.
 - **tmux and screen** sit between sereno and the terminal: `--paint` and `--reset` are refused there.
-- **Windows without Windows Terminal** (the classic console window) gets the prompt and the line-editor colours through a hook line, and no palette.
+- **Windows without Windows Terminal** (the classic console window) gets the prompt and the line-editor colours through a hook line, and no palette: the colours are then those of that console's own table. Where the console names a background other than black, sereno writes no colour at all, so the prompt is plain text and the line editor keeps the colours it has. The window Windows PowerShell opens by itself is such a console: its background is the colour sereno would use for keywords and the branch name. None of this has been looked at on a screen.
 
 [docs/how-it-works.md](docs/how-it-works.md) explains the three ways the palette reaches the screen, the settings file, and what the check before each prompt costs.
 
