@@ -45,7 +45,7 @@ An apply that names `powershell` or `pwsh` in `--hook`, a dry run too, needs to 
 powershell.exe -NoProfile -NonInteractive -Command "$PROFILE.CurrentUserCurrentHost; Get-ExecutionPolicy"
 ```
 
-(or `pwsh` with the same arguments). It reads the two lines of the answer and stops the process if there is none within 15 seconds. Later applies that do not name it look after the line in the file recorded then and, while that file is there, start nothing; when the file is gone, they ask again, a dry run too. Nothing else is ever started. If `SERENO_PS_PROFILE_PATH` or `SERENO_PWSH_PROFILE_PATH` names the profile file, not even this is. sereno writes nothing through that process; PowerShell may write the start-up cache it keeps below `%LOCALAPPDATA%\Microsoft\Windows\PowerShell`, as it does at any start (seen in a temporary home).
+(or `pwsh` with the same arguments). It reads the two lines of the answer and stops the process if there is none within 15 seconds. Later applies that do not name it look after the line in the file recorded then and, while that file is there, start nothing; when the file is gone, they ask again, a dry run too. Nothing else is ever started. If `SERENO_PS_PROFILE_PATH` or `SERENO_PWSH_PROFILE_PATH` names the profile file, not even this is. sereno writes nothing through that process; Windows PowerShell may write the start-up cache it keeps below `%LOCALAPPDATA%\Microsoft\Windows\PowerShell`, as it does at any start (seen in a temporary home). PowerShell 7 keeps its caches in folders of its own, by Microsoft's documentation; that was not tried.
 
 ## What the Serena profile sets for PowerShell 7
 
