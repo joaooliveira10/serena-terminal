@@ -148,7 +148,7 @@ Em todos os comandos: `--lang en|pt-BR` escolhe o idioma das mensagens (sem ela,
 
 ### apply
 
-Grava os arquivos do plano e termina dizendo o que vem em seguida. No Windows com Windows Terminal: "Feche todas as janelas do Windows Terminal, abra o Windows Terminal de novo e escolha Serena no menu de nova aba. O esperado é que mais uma janela de um Windows Terminal que já está aberto não mostre o perfil." O que isso diz do Windows Terminal foi lido no código-fonte da versão 1.24.12741.0; o passo ainda não foi experimentado numa máquina de verdade (veja Situação). No macOS e no Linux: "Nada carrega esses arquivos ainda. Para usá-los, deixe o sereno adicionar uma linha ao arquivo de inicialização do seu shell: `sereno apply --hook bash` (ou zsh, pwsh)."
+Grava os arquivos do plano e termina dizendo o que vem em seguida. No Windows com Windows Terminal: "Feche todas as janelas do Windows Terminal, abra o Windows Terminal de novo e escolha Serena no menu de nova aba. O esperado é que mais uma janela de um Windows Terminal que já está aberto não mostre o que este apply mudou." O que isso diz do Windows Terminal foi lido no código-fonte da versão 1.24.12741.0; o passo ainda não foi experimentado numa máquina de verdade (veja Situação). No macOS e no Linux: "Nada carrega esses arquivos ainda. Para usá-los, deixe o sereno adicionar uma linha ao arquivo de inicialização do seu shell: `sereno apply --hook bash` (ou zsh, pwsh)."
 
 O comando pode ser rodado de novo a qualquer momento; a segunda execução encontra tudo como desejado:
 

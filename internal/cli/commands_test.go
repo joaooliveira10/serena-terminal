@@ -1044,7 +1044,17 @@ func TestApplyNotices(t *testing.T) {
 		if strings.Contains(second.out, stub) || strings.Contains(second.out, open) || strings.Contains(second.out, "`sereno uninstall`") {
 			t.Errorf("an apply that wrote nothing repeats the notices:\n%s", second.out)
 		}
-		// A fragment that is written again says it again.
+		// A fragment that is written again says it again. It is replaced
+		// then, not created: a Windows Terminal that is running lists Serena
+		// already, as the profile was before, which is why the second
+		// sentence speaks of what the apply changed and not of a profile
+		// that is not listed.
+		w.program("pwsh.exe")
+		replaced := w.must(0, "apply", "--shell", "pwsh", "--lang", lang)
+		if !strings.Contains(replaced.out, "  replace "+w.fragment()) || !strings.Contains(replaced.out, stub+"\n"+open+"\n") {
+			t.Errorf("an apply that replaces the fragment does not print the notices of R19 again:\n%s", replaced.out)
+		}
+		noMissingKey(t, replaced.out)
 		changed := w.must(0, "theme", "dark", "--lang", lang)
 		_ = changed
 		w.must(0, "apply", "--no-profile", "--lang", lang)
