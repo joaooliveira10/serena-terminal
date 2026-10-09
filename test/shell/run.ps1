@@ -20,6 +20,11 @@
 # LOCALAPPDATA and APPDATA, PSReadLine is told to save no history, and PATH is
 # an empty folder, so a child that tried to start a program would fail. The
 # system's appearance is never changed: SERENO_OS_MODE stands in for it.
+#
+# One session of the test starts a program all the same, and init.ps1 has no
+# part in it: the session without a console compiles one declaration with
+# Add-Type, which under Windows PowerShell 5.1 starts the compiler of .NET
+# by its full path. init.ps1 itself still starts nothing.
 [CmdletBinding()]
 param(
     [string]$Init = '',
@@ -680,6 +685,30 @@ try {
         $run = Capture { prompt; prompt }
         CheckEqual $run.Console '' 'TERM_PROGRAM=vscode: nothing is painted, Serena Theme owns the palette there'
         CheckEqual $run.Output[1] (Plain ('~' + $T.Sep + 'work')) 'TERM_PROGRAM=vscode: the prompt has no marks'
+    }
+
+    # R25: a session that has no console any more has no colours to hand to
+    # the progress bar. Nothing may fail there either: a failure that is
+    # caught is still an entry in $Error. The session gives its console away
+    # with a function of Windows, which it declares with Add-Type; its check
+    # lines go on through the pipe it was started with.
+    if ($onWindows) {
+        Invoke-Session 'session without a console' @{ SERENO_OS_MODE = 'dark' } $defaultMode {
+            Add-Type -Namespace SerenoTest -Name Native -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool FreeConsole();'
+            $progress = "$($Host.PrivateData.ProgressForegroundColor) on $($Host.PrivateData.ProgressBackgroundColor)"
+            Check ([SerenoTest.Native]::FreeConsole()) 'the session gave its console away'
+            $colour = 'unread'
+            try { $colour = $Host.UI.RawUI.BackgroundColor } catch { $colour = $null }
+            Check ($null -eq $colour) 'and the host no longer names a background'
+            $Error.Clear()
+            $run = Capture { . $T.Init }
+            Check ($run.Console -eq '' -and $run.Output.Count -eq 0) 'without a console init.ps1 prints nothing'
+            Check ($Error.Count -eq 0) 'and leaves $Error empty' ($(if ($Error.Count) { ([string]$Error[0]).Replace("`n", ' ') }))
+            $Error.Clear()
+            CheckEqual "$($Host.PrivateData.ProgressForegroundColor) on $($Host.PrivateData.ProgressBackgroundColor)" $progress 'the progress bar keeps the colours it had'
+            CheckEqual (Capture { prompt }).Text (Plain ('~' + $T.Sep + 'work')) 'and the prompt is the one of any session'
+            Check ($Error.Count -eq 0) 'which fails nowhere either' ($(if ($Error.Count) { ([string]$Error[0]).Replace("`n", ' ') }))
+        } $false
     }
 
     Invoke-Session 'session recognised by WT_PROFILE_ID' @{ WT_SESSION = 'test-session'; WT_PROFILE_ID = '{6B2D8B49-31D3-5DEA-9087-93C26E1A033E}'; SERENO_OS_MODE = 'hc' } $defaultMode {

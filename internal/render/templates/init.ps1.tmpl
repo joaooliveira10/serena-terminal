@@ -309,10 +309,14 @@ $global:__sereno = @{
         $style = $ExecutionContext.SessionState.PSVariable.GetValue('PSStyle')
         if ($null -eq $style) {
             # No $PSStyle: the progress bar is Yellow on DarkCyan. Give it
-            # the colours of the console itself.
+            # the colours of the console itself. A session that has no
+            # console has none to give, and is left as it is.
             $private = $Host.PrivateData
-            $private.ProgressForegroundColor = $Host.UI.RawUI.ForegroundColor
-            $private.ProgressBackgroundColor = $Host.UI.RawUI.BackgroundColor
+            $text = $Host.UI.RawUI.ForegroundColor
+            $back = $Host.UI.RawUI.BackgroundColor
+            if ($null -ne $text) {
+                if ($null -ne $back) { $private.ProgressForegroundColor = $text; $private.ProgressBackgroundColor = $back }
+            }
         } else {
             # $PSStyle: the styles that paint a background lose it.
             & $s['Styles'] $style
