@@ -898,6 +898,37 @@ try {
         CheckEqual (Capture { prompt }).Console (Palette 'dark') 'and the session follows the system'
     }
 
+    # What an uninstall leaves of a session that is open. The session
+    # keeps what it has loaded, the prompt and the colours of the line
+    # editor. Its palette goes by the settings of a first apply from the
+    # next prompt on, because the mode file is gone and a missing file means
+    # those (R11): a Serena tab that ran with the flavour vivid turns to the
+    # soft variant, and a session of another profile that was painted under
+    # inband=always hands the palette back, once.
+    Invoke-Session 'the mode file goes while a Serena tab is open' $profileSession "mode=auto`nflavor=vivid`ninband=profile`nkeys=profile`nprompt=on`n" {
+        . $T.Init
+        CheckEqual (Capture { prompt }).Console (Palette 'dark-vivid') 'the tab starts on the vivid variant'
+        [IO.File]::Delete($T.ModeFile)
+        $next = Capture { prompt }
+        CheckEqual $next.Console (Palette 'dark') 'without the mode file the next prompt paints what auto and soft give'
+        CheckEqual ($global:__sereno['Settings'] -join ' ') 'auto soft profile profile on' 'and the settings are those of a first apply'
+        Check ($next.Text.Contains((Plain ('~' + $T.Sep + 'work')))) 'the Serena prompt stays' (Show $next.Text)
+        CheckEqual ([string](Get-PSReadLineOption).CommandColor) ($E + '[34m') 'and so do the colours of the line editor'
+        CheckEqual (Capture { prompt }).Console '' 'nothing more is painted at the prompt after it'
+        Check ($Error.Count -eq 0) 'and nothing failed' ($(if ($Error.Count) { [string]$Error[0] }))
+    }
+
+    Invoke-Session 'the mode file goes while a session of another profile is open' @{ WT_SESSION = 'test-session'; SERENO_OS_MODE = 'dark' } "mode=auto`nflavor=soft`ninband=always`nkeys=profile`nprompt=on`n" {
+        . $T.Init
+        CheckEqual (Capture { prompt }).Console (Palette 'dark') 'under inband=always the session of another profile is painted'
+        [IO.File]::Delete($T.ModeFile)
+        $next = Capture { prompt }
+        CheckEqual $next.Console (Palette 'reset') 'without the mode file the next prompt hands the palette back with RESET'
+        Check ($next.Text.Contains((Plain ('~' + $T.Sep + 'work')))) 'the Serena prompt stays' (Show $next.Text)
+        CheckEqual (Capture { prompt }).Console '' 'nothing more is written at the prompt after it'
+        Check ($Error.Count -eq 0) 'and nothing failed' ($(if ($Error.Count) { [string]$Error[0] }))
+    }
+
     # R30: a changed mode file that cannot be read at one prompt (another
     # program holds it at that moment) is read at the next one.
     Invoke-Session 'mode file held by another program' $profileSession $defaultMode {
