@@ -194,10 +194,16 @@ func TestReadmesSayWhatWindowsTerminalKeeps(t *testing.T) {
 // uninstall always spoke. What the program does on both paths is
 // TestUninstallAfterTheProfileMoved; this keeps both halves in both
 // languages.
+//
+// It also keeps whose line sereno takes the found one for: the user's. The
+// Portuguese README said "a trata como sua" after the subject "o sereno",
+// which reads as sereno's own just as well, the opposite of the English
+// sentence, and this README uses "suas" for sereno's elsewhere. It now says
+// it without the possessive, and those words are held with the English ones.
 func TestReadmesSayWhichUninstallLeavesTheLineUnsaid(t *testing.T) {
 	expected := map[string][]string{
-		"en":    {"uninstall says that no file is in the recorded place", "a later uninstall leaves it and says nothing"},
-		"pt-BR": {"o uninstall avisa que não há arquivo no lugar registrado", "um uninstall posterior a deixa onde está e não diz nada"},
+		"en":    {"uninstall says that no file is in the recorded place", "finds its line in the moved file and takes it for yours", "a later uninstall leaves it and says nothing"},
+		"pt-BR": {"o uninstall avisa que não há arquivo no lugar registrado", "encontra a linha dele no arquivo movido e passa a tratá-la como uma linha escrita por você", "um uninstall posterior a deixa onde está e não diz nada"},
 	}
 	bothLanguages(t, func(t *testing.T, lang string) {
 		name, text := readme(t, lang)
