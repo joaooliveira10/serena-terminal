@@ -1482,7 +1482,10 @@ func TestRecordedHookWhoseFileIsGone(t *testing.T) {
 // an apply finds in a file was there before sereno (R22), so the uninstall
 // leaves it, and the file, also one sereno itself had created, and its plan
 // names neither. Only when the line is taken out of the moved file between
-// the two commands does sereno add it itself, and take it back.
+// the two commands does sereno add it itself, and take it back. That way
+// round leaves something too where sereno had created the profile: the file
+// held nothing but the line, the apply finds it empty and takes it for the
+// user's, and the uninstall leaves the empty file in its folder.
 //
 // What an uninstall does say (R39): when it finds no file in the recorded
 // place, it names the shell and that place, and says that the line may still
@@ -1652,26 +1655,45 @@ func TestUninstallAfterTheProfileMoved(t *testing.T) {
 			}
 			left(t, w, uninstall, now, with, before)
 		})
-	}
 
-	t.Run("the line is deleted from the moved profile on the way out", func(t *testing.T) {
-		w, _, _, now, before := moved(t, false)
-		w.must(0, "uninstall", "--hook", "powershell")
-		w.write(now, before)
-		again := w.must(0, "apply", "--hook", "powershell", "--lang", "en")
-		if !strings.Contains(again.out, "append  "+now) || strings.Count(w.read(now), engine.HookMarker) != 1 {
-			t.Errorf("the second apply did not add the line to the moved profile itself:\n%s", again.out)
-		}
-		if out := w.must(0, "uninstall", "--lang", "en").out; strings.Contains(out, english.T(goneKey, "powershell", now)) {
-			t.Errorf("the uninstall took the line out of its file, and says that the file is gone:\n%s", out)
-		}
-		if got := w.read(now); got != before {
-			t.Errorf("the moved profile is %q after the uninstall, want it as it was before sereno: %q", got, before)
-		}
-		if _, err := os.Lstat(w.root()); !os.IsNotExist(err) {
-			t.Errorf("sereno's folder is still there after the uninstall (%v)", err)
-		}
-	})
+		t.Run(home.name+", the line deleted from the moved profile on the way out", func(t *testing.T) {
+			w, _, _, now, before := moved(t, home.created)
+			w.must(0, "uninstall", "--hook", "powershell")
+			// Without sereno's line the profile is what it was before sereno.
+			// One sereno created held nothing else: it is an empty file now.
+			w.write(now, before)
+			again := w.must(0, "apply", "--hook", "powershell", "--lang", "en")
+			if !strings.Contains(again.out, "append  "+now) || strings.Count(w.read(now), engine.HookMarker) != 1 {
+				t.Errorf("the second apply did not add the line to the moved profile itself:\n%s", again.out)
+			}
+			uninstall := w.must(0, "uninstall", "--lang", "en")
+			if strings.Contains(uninstall.out, english.T(goneKey, "powershell", now)) {
+				t.Errorf("the uninstall took the line out of its file, and says that the file is gone:\n%s", uninstall.out)
+			}
+			// What is left where sereno had created the profile: the file,
+			// empty, in the folder sereno had made for it, which moved with
+			// it. The second apply found a file there, so for sereno it is a
+			// file of the user's with nothing in it: uninstall takes its line
+			// out and deletes neither the file nor the folder, and no line of
+			// the plan says that they stay. The documents do
+			// (docs/uninstall.md, docs/support-matrix.md).
+			if info, err := os.Lstat(now); err != nil || !info.Mode().IsRegular() {
+				t.Fatalf("the moved profile is not there after the uninstall (%v)", err)
+			}
+			if got := w.read(now); got != before {
+				t.Errorf("the moved profile is %q after the uninstall, want it as it was before sereno: %q", got, before)
+			}
+			for _, taken := range []string{"remove  " + now, "rmdir   " + filepath.Dir(now)} {
+				if strings.Contains(uninstall.out, taken) {
+					t.Errorf("the plan of the uninstall has the line %q, and the file sereno did not make this time is the user's:\n%s", taken, uninstall.out)
+				}
+			}
+			noMissingKey(t, uninstall.out, uninstall.err)
+			if _, err := os.Lstat(w.root()); !os.IsNotExist(err) {
+				t.Errorf("sereno's folder is still there after the uninstall (%v)", err)
+			}
+		})
+	}
 }
 
 // TestRecordedHookOfAShellThatIsGone: a hook is an option of every later
