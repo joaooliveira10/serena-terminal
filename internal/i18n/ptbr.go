@@ -12,6 +12,7 @@ var portuguese = map[string]string{
 	"plan.note.backup-of":        "cópia de %s de antes da linha de hook",
 	"plan.note.backup-kept":      "%s mudou depois que a linha de hook foi adicionada, então o backup fica",
 	"plan.note.backup-kept-line": "a linha de hook continua em %s, então o backup fica",
+	"plan.note.backup-kept-gone": "%s não está mais lá, então o backup fica",
 	"plan.note.hook-present":     "a linha de hook já está lá",
 	"plan.note.hook-replaces":    "substitui a linha do sereno que está lá",
 	"plan.note.hook-removed":     "linha de hook removida",

@@ -79,6 +79,7 @@ const (
 	NoteBackupOf     = "plan.note.backup-of"
 	NoteBackupKept   = "plan.note.backup-kept"
 	NoteBackupLine   = "plan.note.backup-kept-line"
+	NoteBackupGone   = "plan.note.backup-kept-gone"
 	NoteHookPresent  = "plan.note.hook-present"
 	NoteHookReplaces = "plan.note.hook-replaces"
 	NoteHookRemoved  = "plan.note.hook-removed"

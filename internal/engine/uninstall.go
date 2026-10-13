@@ -261,8 +261,9 @@ func (u *remover) owned(path, recorded string) error {
 func (u *remover) hook(record HookRecord) bool {
 	backup, haveBackup := readBackup(record)
 	// keepBackup reports a backup that stays, with the reason: the profile is
-	// not what it was before the hook (NoteBackupKept), or the line could
-	// not be taken out of it at all (NoteBackupLine).
+	// not what it was before the hook (NoteBackupKept), the line could not be
+	// taken out of it at all (NoteBackupLine), or no file is there any more
+	// (NoteBackupGone).
 	keepBackup := func(why string) {
 		if record.Backup == "" {
 			return
@@ -296,12 +297,14 @@ func (u *remover) hook(record HookRecord) bool {
 		// Gone already. If sereno had created it, its directories may go.
 		// Deleted or moved, that cannot be told from here, and a file that
 		// was moved has the line in it still: the plan notes the record, so
-		// that the command can say so.
+		// that the command can say so. The backup of a file that was there
+		// before sereno stays, and its line says why: of a file that is not
+		// there nobody can say that it changed.
 		u.absent = append(u.absent, record)
 		if record.FileCreated {
 			u.rmdirs(record.DirsCreated)
 		} else {
-			keepBackup(NoteBackupKept)
+			keepBackup(NoteBackupGone)
 		}
 		return true
 	}

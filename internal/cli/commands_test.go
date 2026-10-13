@@ -1545,6 +1545,39 @@ func TestUninstallAfterTheProfileMoved(t *testing.T) {
 			t.Errorf("the copy in backups is %q, want the profile as it was before sereno: %q", got, before)
 		}
 	}
+	// keeps checks the line an uninstall has for the copy of a profile that
+	// was there before sereno, when no file is in the recorded place: the
+	// copy stays, and its note says that the file is no longer there. That
+	// the file changed after the hook line was added is the note of a file
+	// uninstall has read; here it would stand a few lines above the sentence
+	// that no file is there. A profile sereno created has no copy, and the
+	// plan no such line.
+	keeps := func(t *testing.T, w *world, lang, out, first, before string) {
+		t.Helper()
+		catalog := i18n.For(i18n.Lang(lang))
+		copies := "  keep    " + filepath.Join(w.root(), engine.BackupsDir) + string(filepath.Separator)
+		gone := " (" + catalog.T(engine.NoteBackupGone, first) + ")"
+		lines := 0
+		for _, line := range strings.Split(out, "\n") {
+			if !strings.HasPrefix(line, copies) {
+				continue
+			}
+			lines++
+			if !strings.HasSuffix(line, gone) {
+				t.Errorf("the line for the copy of the profile does not end with %q: %s", gone, line)
+			}
+		}
+		want := 1
+		if before == "" {
+			want = 0
+		}
+		if lines != want {
+			t.Errorf("the plan has %d lines that keep a copy in backups, want %d:\n%s", lines, want, out)
+		}
+		if changed := catalog.T(engine.NoteBackupKept, first); strings.Contains(out, changed) {
+			t.Errorf("the plan says of a file that is not there that it changed (%q):\n%s", changed, out)
+		}
+	}
 	for _, home := range []struct {
 		name    string
 		created bool
@@ -1561,11 +1594,13 @@ func TestUninstallAfterTheProfileMoved(t *testing.T) {
 				t.Errorf("the dry run does not say once that the recorded file is gone (%q):\n%s", want, dry.out)
 			}
 			noMissingKey(t, dry.out)
+			keeps(t, w, "pt-BR", dry.out, first, before)
 			sameTree(t, "uninstall --dry-run", tree, w.tree())
 			uninstall := w.must(0, "uninstall", "--lang", "en")
 			if want := english.T(goneKey, "powershell", first); strings.Count(uninstall.out, want+"\n") != 1 {
 				t.Errorf("the uninstall does not say once that the recorded file is gone (%q):\n%s", want, uninstall.out)
 			}
+			keeps(t, w, "en", uninstall.out, first, before)
 			left(t, w, uninstall, now, with, before)
 			if prober.asked != 1 {
 				t.Errorf("the uninstall asked PowerShell (%d calls in all)", prober.asked)
@@ -1578,9 +1613,11 @@ func TestUninstallAfterTheProfileMoved(t *testing.T) {
 			w.must(engine.ExitRefused, "apply")
 			gone := english.T(goneKey, "powershell", first)
 			for _, args := range [][]string{{"uninstall", "--hook", "powershell", "--dry-run", "--lang", "en"}, {"uninstall", "--hook", "powershell", "--lang", "en"}} {
-				if out := w.must(0, args...).out; strings.Count(out, gone+"\n") != 1 {
+				out := w.must(0, args...).out
+				if strings.Count(out, gone+"\n") != 1 {
 					t.Errorf("sereno %s does not say once that the recorded file is gone (%q):\n%s", strings.Join(args, " "), gone, out)
 				}
+				keeps(t, w, "en", out, first, before)
 			}
 			again := w.must(0, "apply", "--hook", "powershell", "--lang", "en")
 			if want := "keep    " + now + " (" + english.T(engine.NoteHookPresent) + ")"; !strings.Contains(again.out, want) {

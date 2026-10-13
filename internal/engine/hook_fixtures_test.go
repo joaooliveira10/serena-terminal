@@ -429,6 +429,14 @@ func TestHookLifecycles(t *testing.T) {
 		if plan.ExitCode() != ExitOK || plan.Count(VerbKeep) != 1 {
 			t.Errorf("exit %d, %v", plan.ExitCode(), verbs(s, plan))
 		}
+		// The line of the backup says that the file is no longer there. That
+		// it changed after the hook line was added is the note of a file
+		// planning has read, and cannot be said of one that is gone.
+		for _, op := range plan.Ops {
+			if op.Verb == VerbKeep && (op.Path != record.Backup || op.Note.Key != NoteBackupGone || !reflect.DeepEqual(op.Note.Args, []any{target})) {
+				t.Errorf("the plan keeps %s with the note %s %v, want %s with %s for %s", op.Path, op.Note.Key, op.Note.Args, record.Backup, NoteBackupGone, target)
+			}
+		}
 		if _, err := os.Stat(record.Backup); err != nil {
 			t.Error("the only copy of the user's file was deleted")
 		}
