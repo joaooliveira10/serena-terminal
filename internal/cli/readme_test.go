@@ -218,10 +218,17 @@ func TestReadmesSayWhichUninstallLeavesTheLineUnsaid(t *testing.T) {
 // up first and went on quoting it, a few lines higher, in the help of
 // `sereno theme`: the one-line help of --inband and the sentence of each
 // README about `--inband always` are held to the same words here.
+//
+// Each README quotes the help line too, so the words looked for in its
+// sentence must be words the help line does not have: the Portuguese ones
+// were "toda sessão que o próprio Windows Terminal iniciou", which the
+// quoted help alone satisfied, and the sentence could be reworded unnoticed.
+// They begin with the verb of the sentence now, in both languages, and the
+// test fails when the help line would do for them.
 func TestHelpSaysWhichSessionsInbandAlwaysReaches(t *testing.T) {
 	expected := map[string]struct{ help, readme, old string }{
-		"en":    {"in every session Windows Terminal started itself", "every session that Windows Terminal started itself", "every Windows Terminal session"},
-		"pt-BR": {"em toda sessão que o próprio Windows Terminal iniciou", "toda sessão que o próprio Windows Terminal iniciou", "toda sessão do Windows Terminal"},
+		"en":    {"in every session Windows Terminal started itself", "extends the repainting to every session that Windows Terminal started itself", "every Windows Terminal session"},
+		"pt-BR": {"em toda sessão que o próprio Windows Terminal iniciou", "estende a repintura a toda sessão que o próprio Windows Terminal iniciou", "toda sessão do Windows Terminal"},
 	}
 	bothLanguages(t, func(t *testing.T, lang string) {
 		want := expected[lang]
@@ -229,6 +236,9 @@ func TestHelpSaysWhichSessionsInbandAlwaysReaches(t *testing.T) {
 		name, text := readme(t, lang)
 		if !strings.Contains(help, want.help) {
 			t.Errorf("help.theme.flag.inband (%s) does not say %q: %s", lang, want.help, help)
+		}
+		if strings.Contains(help, want.readme) {
+			t.Errorf("the words looked for in %s are in the help line it quotes, which alone would satisfy this test: %s", name, want.readme)
 		}
 		if !strings.Contains(text, want.readme) {
 			t.Errorf("%s does not say which sessions `--inband always` reaches: %s", name, want.readme)
