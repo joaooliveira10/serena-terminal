@@ -254,7 +254,7 @@ var portuguese = map[string]string{
 	"help.theme.about":       "Sem argumentos, mostra as configurações, o que o sistema informa e a variante que resulta disso. Um modo, --flavor ou --inband muda a configuração para todas as sessões. --paint e --reset só escrevem neste terminal e não precisam de apply.",
 	"help.theme.arg":         "auto acompanha o sistema; os outros fixam uma aparência (hc é alto contraste)",
 	"help.theme.flag.flavor": "cores mais suaves ou mais vivas para dark e light",
-	"help.theme.flag.inband": "onde o sereno repinta o terminal no prompt: no perfil Serena, em toda sessão do Windows Terminal ou nunca",
+	"help.theme.flag.inband": "onde o sereno repinta o terminal no prompt: no perfil Serena, em toda sessão que o próprio Windows Terminal iniciou ou nunca",
 	"help.theme.flag.show":   "mostra também os 16 slots, uma amostra de cada papel e o contraste medido",
 	"help.theme.flag.paint":  "pinta este terminal agora: dark, dark-vivid, light, light-vivid, hc ou hc-light",
 	"help.theme.flag.reset":  "devolve a este terminal as cores dele",

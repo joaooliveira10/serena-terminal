@@ -185,6 +185,39 @@ func TestReadmesSayWhatWindowsTerminalKeeps(t *testing.T) {
 	})
 }
 
+// TestHelpSaysWhichSessionsInbandAlwaysReaches: `--inband always` repaints
+// the sessions that Windows Terminal started itself, which are the ones that
+// carry WT_SESSION; init.ps1 and `sereno` go by that variable and by nothing
+// else. A tab that Windows opened through its default-terminal setting is in
+// Windows Terminal and is expected to carry no WT_SESSION, so "every Windows
+// Terminal session" says more than the program does. The READMEs gave that
+// up first and went on quoting it, a few lines higher, in the help of
+// `sereno theme`: the one-line help of --inband and the sentence of each
+// README about `--inband always` are held to the same words here.
+func TestHelpSaysWhichSessionsInbandAlwaysReaches(t *testing.T) {
+	expected := map[string]struct{ help, readme, old string }{
+		"en":    {"in every session Windows Terminal started itself", "every session that Windows Terminal started itself", "every Windows Terminal session"},
+		"pt-BR": {"em toda sessão que o próprio Windows Terminal iniciou", "toda sessão que o próprio Windows Terminal iniciou", "toda sessão do Windows Terminal"},
+	}
+	bothLanguages(t, func(t *testing.T, lang string) {
+		want := expected[lang]
+		help := i18n.For(i18n.Lang(lang)).T("help.theme.flag.inband")
+		name, text := readme(t, lang)
+		if !strings.Contains(help, want.help) {
+			t.Errorf("help.theme.flag.inband (%s) does not say %q: %s", lang, want.help, help)
+		}
+		if !strings.Contains(text, want.readme) {
+			t.Errorf("%s does not say which sessions `--inband always` reaches: %s", name, want.readme)
+		}
+		if strings.Contains(help, want.old) {
+			t.Errorf("help.theme.flag.inband (%s) says %q again: %s", lang, want.old, help)
+		}
+		if strings.Contains(text, want.old) {
+			t.Errorf("%s says %q again", name, want.old)
+		}
+	})
+}
+
 // TestReadmesShowRealOutputOfWindows: the examples that were taken on a
 // Windows home, in the order a reader meets the commands: the hook lines of
 // a dry run, a second apply, status, the plan of an uninstall, a change of

@@ -13,7 +13,7 @@ Terminals accept colour changes from the program running inside them, through es
 ## Decision
 
 - A session started from the Serena profile checks the system before each prompt: three values of the current user's registry, read inside the shell, with no other program started. When the variant that follows from them is not the one the session sent last, it writes the palette of that variant to the terminal.
-- Where this happens is a setting, `inband`: `profile` (sessions from the Serena profile, the default), `always` (every Windows Terminal session that loads sereno's files) or `off`.
+- Where this happens is a setting, `inband`: `profile` (sessions from the Serena profile, the default), `always` (every session that Windows Terminal started itself and that loads sereno's files) or `off`.
 - It never happens in VS Code's terminal, where the editor's theme owns the palette, and never outside Windows Terminal. Painting on request (`sereno theme --paint`) is refused under tmux and screen.
 - The fragment still names the dark and light pair, so that a user whose Windows Terminal is set to "Use Windows theme" gets the right scheme from the first frame.
 

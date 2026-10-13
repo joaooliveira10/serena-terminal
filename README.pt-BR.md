@@ -344,7 +344,7 @@ Sem argumentos, mostra as configurações, o que o sistema informa e a variante 
 
   auto|dark|light|hc|hc-light   auto acompanha o sistema; os outros fixam uma aparência (hc é alto contraste)
   --flavor soft|vivid           cores mais suaves ou mais vivas para dark e light
-  --inband profile|always|off   onde o sereno repinta o terminal no prompt: no perfil Serena, em toda sessão do Windows Terminal ou nunca
+  --inband profile|always|off   onde o sereno repinta o terminal no prompt: no perfil Serena, em toda sessão que o próprio Windows Terminal iniciou ou nunca
   --show                        mostra também os 16 slots, uma amostra de cada papel e o contraste medido
   --paint VARIANT               pinta este terminal agora: dark, dark-vivid, light, light-vivid, hc ou hc-light
   --reset                       devolve a este terminal as cores dele
