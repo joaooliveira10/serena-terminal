@@ -734,15 +734,28 @@ try {
             # fifteen (PSReadLine 2.1 and 2.2). init.ps1 sets each of them
             # where its property exists, and in a plain console none, while
             # keys=always may still switch the predictions themselves on:
-            # their colour is then the one PSReadLine chose.
-            $later = 'InlinePredictionColor', 'ListPredictionColor', 'ListPredictionSelectedColor'
+            # their colour is then the one the session had. Each of the
+            # three is first given a value of this session's own, as the
+            # styles above are. What init.ps1 gives ListPrediction, ESC[33m,
+            # is what PSReadLine 2.4.5 starts with by its source
+            # (DefaultListPredictionColor): left untouched, that colour
+            # would compare equal whether init.ps1 had set it or not.
+            $later = [ordered]@{ InlinePredictionColor = '[95m'; ListPredictionColor = '[94m'; ListPredictionSelectedColor = '[4;96m' }
             $laterBefore = @{}
-            foreach ($name in $later) { if ((Get-PSReadLineOption).PSObject.Properties[$name]) { $laterBefore[$name] = Show ([string](Get-PSReadLineOption).$name) } }
+            foreach ($name in $later.Keys) {
+                if ((Get-PSReadLineOption).PSObject.Properties[$name]) {
+                    # The key of -Colors is the name without "Color".
+                    $own = @{}; $own[$name.Substring(0, $name.Length - 5)] = $E + $later[$name]
+                    Set-PSReadLineOption -Colors $own
+                    $laterBefore[$name] = Show ([string](Get-PSReadLineOption).$name)
+                    CheckEqual $laterBefore[$name] (Show ($E + $later[$name])) "this session gave $name a value of its own first"
+                }
+            }
             $run = Capture { . $T.Init }
             Check ($run.Console -eq '' -and $run.Output.Count -eq 0 -and $Error.Count -eq 0) 'init.ps1 prints nothing there and nothing in it fails' ($(if ($Error.Count) { [string]$Error[0] }))
             Check ($global:__sereno['Plain'] -and -not $global:__sereno['Terminal']) 'the session knows that it writes no colour'
             CheckEqual (& $colours) $before 'the line editor keeps the fifteen colours it had'
-            foreach ($name in $later) {
+            foreach ($name in $later.Keys) {
                 if ($laterBefore.ContainsKey($name)) { CheckEqual (Show ([string](Get-PSReadLineOption).$name)) $laterBefore[$name] "and its $name, which is not a slot colour either" }
                 else { Check $true "PSReadLine $((Get-Module PSReadLine).Version) has no $name to keep" }
             }
