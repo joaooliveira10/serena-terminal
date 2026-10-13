@@ -85,7 +85,7 @@ prompt=on
 | :--- | :--- | :--- |
 | `mode` | `auto`, `dark`, `light`, `hc`, `hc-light` | `auto` follows the system; the others fix one appearance. `hc` is high contrast. |
 | `flavor` | `soft`, `vivid` | The softer or the more vivid colours, for dark and light. The high-contrast variants have one flavour. |
-| `inband` | `profile`, `always`, `off` | Where the session sends the colours at the prompt: in sessions started from the Serena profile, in every Windows Terminal session that loads sereno's files, or nowhere. |
+| `inband` | `profile`, `always`, `off` | Where the session sends the colours at the prompt: in sessions started from the Serena profile, in every session that Windows Terminal started itself and that loads sereno's files, or nowhere. |
 | `keys` | `profile`, `always`, `off` | Where the PSReadLine comfort keys are set. |
 | `prompt` | `on`, `off` | Whether the Serena prompt is installed. |
 
@@ -142,7 +142,7 @@ PowerShell (`init.ps1`, the same file for 5.1 and 7):
 - The Serena prompt replaces the stock PowerShell prompt only. It shows the path (the home folder as `~`), the branch of the Git repository when there is one, the duration of the last command when it took 2 seconds or more, and on a second line a `>` in slot 2 after a command that succeeded and in slot 1 after one that failed. The branch is read from the files of the repository; `git` is not started.
 - A prompt of your own is kept. Inside Windows Terminal it is wrapped so that the check above still runs after it; its output is returned unchanged.
 - Inside Windows Terminal the Serena prompt also emits the marks that let the terminal find prompts and the current folder (OSC 133 and OSC 9;9).
-- The colours of PSReadLine, the line editor, are set through slots, when PSReadLine is already loaded. Keys of newer PSReadLine versions are set only where they exist. In a console window of Windows itself (not Windows Terminal, not VS Code) whose background is not black, they are not set, the prompt has no colours and the styles of PowerShell 7 are not rewritten: there the background is itself one of the sixteen slots, and a slot as text would be one slot on another.
+- The colours of PSReadLine, the line editor, are set through slots, when PSReadLine is already loaded. Keys of newer PSReadLine versions are set only where they exist. In a session on Windows that has no `WT_SESSION`, is not the terminal of VS Code and whose console names a background other than black, they are not set, the prompt has no colours and the styles of PowerShell 7 are not rewritten. That test is how `init.ps1` knows a console window of Windows itself, which it cannot see: there the background is itself one of the sixteen slots, and a slot as text would be one slot on another.
 - The comfort keys, where the `keys` setting allows them: Tab opens the completion menu, the up and down arrows search the history for what is already typed, the bell is off, a repeated command comes up only once when the history is recalled (the history file still keeps every line), and history predictions are switched on where PSReadLine has them, they were off, and PSReadLine can show them (on Windows it cannot where the output is redirected or the console has no virtual terminal sequences). Nothing else is bound, and no module is loaded.
 
 bash (`init.bash`, written for bash 3.2 and newer) and zsh (`init.zsh`):
