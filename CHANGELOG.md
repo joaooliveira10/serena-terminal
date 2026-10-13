@@ -23,8 +23,8 @@ Nothing has been released yet. This section describes version 0.1 as the code st
 
 ### Not verified yet
 
-- PowerShell 7, zsh and everything on macOS have run in CI only (GitHub-hosted runners; last in run 38457983362 of the CI workflow, on 2026-10-13, of commit 515fb8f), where the automated tests pass. None of it has run on a machine of the maintainer, and no person has seen it on a screen.
-- What was committed after that run has run on the maintainer's machine only (Windows 11, Windows PowerShell 5.1), until the next run of CI: sentences of the documents, the help line of `--inband`, the note `sereno uninstall` puts on the backup of a start-up file that is no longer there, and tests. No run of CI is of a real user profile, and nothing has been confirmed on a machine that has an application control policy.
+- PowerShell 7, zsh and everything on macOS have run in CI only (GitHub-hosted runners; this is said of run 38457983362 of the CI workflow, on 2026-10-13, which ran commit 515fb8f), where the automated tests pass. None of it has run on a machine of the maintainer, and no person has seen it on a screen.
+- What was committed after that commit has run on the maintainer's machine only (Windows 11, Windows PowerShell 5.1), until the next run of CI: sentences of the documents, the help line of `--inband`, the note `sereno uninstall` puts on the backup of a start-up file that is no longer there, and tests. No run of CI is of a real user profile, and nothing has been confirmed on a machine that has an application control policy.
 - On a screen, one thing has been seen: on the maintainer's machine, `sereno theme --paint light` repainted an open Windows Terminal tab. The program has not been applied to a real user profile, and nothing else has been confirmed on a screen.
 - The exported theme files have not been loaded into their emulators.
 - The release workflow has not run, and the download step of the install scripts has not been used against a real release.
