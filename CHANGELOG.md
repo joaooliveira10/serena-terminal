@@ -24,6 +24,7 @@ Nothing has been released yet. This section describes version 0.1 as the code st
 ### Not verified yet
 
 - PowerShell 7, zsh and everything on macOS have run in CI only (GitHub-hosted runners, 2026-10-08), where the automated tests pass. None of it has run on a machine of the maintainer, and no person has seen it on a screen.
+- What changed after those runs has not run in CI: the hook line of PowerShell, what `init.ps1` does in a console window of Windows whose background is not black and in a session without a console, when PowerShell is asked for its profile, the starting folder of the Serena profile, when `sereno status` warns about the theme of Windows Terminal, and some sentences of apply, status and uninstall. It has run on the maintainer's machine only (Windows 11, Windows PowerShell 5.1), and so not under PowerShell 7, zsh, macOS or Linux.
 - On a screen, one thing has been seen: on the maintainer's machine, `sereno theme --paint light` repainted an open Windows Terminal tab. The program has not been applied to a real user profile, and nothing else has been confirmed on a screen.
 - The exported theme files have not been loaded into their emulators.
 - The release workflow has not run, and the download step of the install scripts has not been used against a real release.
