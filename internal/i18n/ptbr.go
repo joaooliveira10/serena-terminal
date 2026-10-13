@@ -190,7 +190,7 @@ var portuguese = map[string]string{
 	"wt.settings-unreadable":  "%[1]s não pôde ser lido como JSON (%[2]s); o que depende dele não é informado.",
 	"owned.modified":          "Editados depois que o sereno os gravou: %s. O apply deixa um arquivo assim como está e o uninstall também, menos o arquivo mode, que o uninstall sempre apaga; apague o arquivo para o sereno gravá-lo de novo.",
 	"owned.missing":           "Gravados pelo sereno e não estão mais lá: %s. O `sereno apply` grava de novo.",
-	"hook.missing":            "A linha de hook de %[1]s não está mais em %[2]s. O `sereno apply` a coloca de volta; `sereno uninstall --hook %[1]s` a esquece.",
+	"hook.missing":            "A linha de hook de %[1]s não está mais em %[2]s. O `sereno apply` a coloca de volta, ou diz por que não pode; `sereno uninstall --hook %[1]s` a esquece.",
 	"hook.missing.unreadable": "Não dá para procurar a linha de hook de %[1]s: %[2]s %[3]s.",
 	"session.vscode":          "Este é o terminal integrado do VS Code: quem manda na paleta é o tema de cores do editor, então o sereno não repinta aqui. Escolha um tema de cores Serena no VS Code.",
 	"pwsh.absent":             "O PowerShell 7 (pwsh) não está no PATH. Não falta nada: o Windows PowerShell 5.1 tem suporte completo. Se você quiser o PowerShell 7, este comando o instala, e o sereno nunca o roda por você: %s",

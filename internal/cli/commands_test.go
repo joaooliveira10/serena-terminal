@@ -1340,6 +1340,15 @@ func TestRecordedHookWhoseFileIsGone(t *testing.T) {
 		}
 		prober.result = shells.ProbeResult{ProfilePath: moved, Policy: "RemoteSigned"}
 		tree := w.tree()
+		// `sereno status` calls the line missing here, and the apply it
+		// points to is the one that is refused below: what the warning says
+		// of apply has to hold in this state too, in both languages.
+		for lang, cannot := range map[string]string{"en": "or says why it cannot", "pt-BR": "ou diz por que não pode"} {
+			warning := i18n.For(i18n.Lang(lang)).T(WarnHookMissing, "powershell", first)
+			if status := w.must(0, "status", "--lang", lang).out; !strings.Contains(status, warning) || !strings.Contains(warning, cannot) {
+				t.Errorf("sereno status --lang %s does not warn that the line is missing, or promises that apply adds it again (%q):\n%s", lang, warning, status)
+			}
+		}
 		for _, args := range [][]string{{"apply"}, {"apply", "--dry-run"}, {"apply", "--hook", "bash"}} {
 			asked := prober.asked
 			refused := w.must(engine.ExitRefused, args...)

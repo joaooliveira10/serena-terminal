@@ -190,7 +190,7 @@ var english = map[string]string{
 	"wt.settings-unreadable":  "%[1]s could not be read as JSON (%[2]s); what depends on it is not reported.",
 	"owned.modified":          "Edited since sereno wrote them: %s. apply leaves such a file as it is and so does uninstall, except the mode file, which uninstall always deletes; delete a file to let sereno write it again.",
 	"owned.missing":           "Written by sereno and gone: %s. `sereno apply` writes them again.",
-	"hook.missing":            "The hook line for %[1]s is no longer in %[2]s. `sereno apply` adds it again; `sereno uninstall --hook %[1]s` forgets it.",
+	"hook.missing":            "The hook line for %[1]s is no longer in %[2]s. `sereno apply` adds it again, or says why it cannot; `sereno uninstall --hook %[1]s` forgets it.",
 	"hook.missing.unreadable": "The hook line for %[1]s cannot be looked for: %[2]s %[3]s.",
 	"session.vscode":          "This is VS Code's integrated terminal: the editor's colour theme owns the palette, so sereno does not repaint here. Choose a Serena colour theme in VS Code.",
 	"pwsh.absent":             "PowerShell 7 (pwsh) is not on PATH. Nothing is missing: Windows PowerShell 5.1 is fully supported. If you want PowerShell 7, this installs it, and sereno never runs it for you: %s",
