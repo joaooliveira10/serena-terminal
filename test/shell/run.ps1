@@ -915,7 +915,8 @@ try {
     # editor. Its palette goes by the settings of a first apply from the
     # next prompt on, because the mode file is gone and a missing file means
     # those (R11): a Serena tab that ran with the flavour vivid turns to the
-    # soft variant, and a session of another profile that was painted under
+    # soft variant, a Serena tab that ran with inband=off is painted for the
+    # first time, and a session of another profile that was painted under
     # inband=always hands the palette back, once.
     Invoke-Session 'the mode file goes while a Serena tab is open' $profileSession "mode=auto`nflavor=vivid`ninband=profile`nkeys=profile`nprompt=on`n" {
         . $T.Init
@@ -926,6 +927,17 @@ try {
         CheckEqual ($global:__sereno['Settings'] -join ' ') 'auto soft profile profile on' 'and the settings are those of a first apply'
         Check ($next.Text.Contains((Plain ('~' + $T.Sep + 'work')))) 'the Serena prompt stays' (Show $next.Text)
         CheckEqual ([string](Get-PSReadLineOption).CommandColor) ($E + '[34m') 'and so do the colours of the line editor'
+        CheckEqual (Capture { prompt }).Console '' 'nothing more is painted at the prompt after it'
+        Check ($Error.Count -eq 0) 'and nothing failed' ($(if ($Error.Count) { [string]$Error[0] }))
+    }
+
+    Invoke-Session 'the mode file goes while a Serena tab that was never painted is open' $profileSession "mode=auto`nflavor=soft`ninband=off`nkeys=profile`nprompt=on`n" {
+        . $T.Init
+        CheckEqual (Capture { prompt; prompt }).Console '' 'under inband=off the tab is not painted'
+        [IO.File]::Delete($T.ModeFile)
+        $next = Capture { prompt }
+        CheckEqual $next.Console (Palette 'dark') 'without the mode file the next prompt paints the tab, for the first time'
+        Check ($next.Text.Contains((Plain ('~' + $T.Sep + 'work')))) 'the Serena prompt stays' (Show $next.Text)
         CheckEqual (Capture { prompt }).Console '' 'nothing more is painted at the prompt after it'
         Check ($Error.Count -eq 0) 'and nothing failed' ($(if ($Error.Count) { [string]$Error[0] }))
     }
