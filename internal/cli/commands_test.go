@@ -1320,6 +1320,11 @@ func TestRecordedHookWhenPowerShellAnswersDifferently(t *testing.T) {
 // that takes effect. So PowerShell is asked, as if the shell had been named:
 // a profile that moved is refused with the way out, and one the user deleted
 // is made again only where PowerShell still names it and still loads it.
+//
+// The last two cases are the two ends of "there". Anything that stands at
+// the recorded path counts, also what is no profile: nobody is asked, and
+// the engine, which looks at that path itself, says what is wrong with it
+// (R22). A link that leads nowhere does not count: PowerShell is asked.
 func TestRecordedHookWhoseFileIsGone(t *testing.T) {
 	t.Run("the profile moved and PowerShell names the new place", func(t *testing.T) {
 		w, prober, first := recordedHook(t)
@@ -1404,6 +1409,44 @@ func TestRecordedHookWhoseFileIsGone(t *testing.T) {
 		}
 		if !strings.Contains(refused.err, shells.PolicyCommand) {
 			t.Errorf("the refusal does not name %q:\n%s", shells.PolicyCommand, refused.err)
+		}
+		noMissingKey(t, refused.err)
+		sameTree(t, "a refused apply", tree, w.tree())
+	})
+
+	t.Run("a folder stands where the profile was", func(t *testing.T) {
+		w, prober, first := recordedHook(t)
+		if err := os.Remove(first); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(first, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		tree := w.tree()
+		refused := w.must(engine.ExitRefused, "apply", "--lang", "en")
+		if prober.asked != 1 {
+			t.Errorf("the apply asked PowerShell %d times in all, want 1: something stands at the recorded path, and the engine is the one to judge it", prober.asked)
+		}
+		if want := first + ": " + i18n.For(i18n.English).T(engine.ReasonNotRegular); !strings.Contains(refused.err, want) {
+			t.Errorf("the refusal does not say %q:\n%s", want, refused.err)
+		}
+		noMissingKey(t, refused.err)
+		sameTree(t, "a refused apply", tree, w.tree())
+	})
+
+	t.Run("a link that leads nowhere stands where the profile was", func(t *testing.T) {
+		w, prober, first := recordedHook(t)
+		if err := os.Remove(first); err != nil {
+			t.Fatal(err)
+		}
+		testenv.Symlink(t, filepath.Join(filepath.Dir(first), "nowhere.ps1"), first)
+		tree := w.tree()
+		refused := w.must(engine.ExitRefused, "apply", "--lang", "en")
+		if prober.asked != 2 {
+			t.Errorf("the apply asked PowerShell %d times in all, want 2: a link that leads nowhere is no file that is there", prober.asked)
+		}
+		if want := first + ": " + i18n.For(i18n.English).T(engine.ReasonSymlink); !strings.Contains(refused.err, want) {
+			t.Errorf("the refusal does not say %q:\n%s", want, refused.err)
 		}
 		noMissingKey(t, refused.err)
 		sameTree(t, "a refused apply", tree, w.tree())
