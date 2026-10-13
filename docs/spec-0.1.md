@@ -364,7 +364,7 @@ Recorded on 2026-10-08, as he reported it. T11 was planned as a spike with a scr
 
 ## Sentences that wait for T12
 
-Listed on 2026-10-13, as the second review of that day asked. These are the sentences of the repository that say "not seen", "expected" or "still to come" of something T12 looks at, or that state as a fact something T12 is the first to observe. None of them changes before T12 has been run. After it, each changes only from what the record of T12 holds for the point it waits for; where the record does not show the thing, the sentence stays as it is.
+Listed on 2026-10-13, as the second review of that day asked. These are the sentences of the repository that say "not seen", "expected" or "still to come" of something T12 looks at, or that state as a fact something T12 is the first to observe. None of them changes before T12 has been run. After it, each changes only from what the record of T12 holds for the point it waits for; where the record does not show the thing, the sentence stays as it is. The third review of that day found three sentences the list had left out, two of them conditional in the way of others here: the two about a stored execution policy, and the one that says `sereno apply` has not been run on the owner's machine. They are entries now.
 
 Each entry names the file, a few words of the sentence as it stands, and the point of T12. The words are the address: an earlier list, kept outside the repository, named its sentences by line number, and later commits moved them. A test in internal/policy looks for the quoted words in the file an entry names, so an entry cannot outlive its sentence unnoticed: whoever changes one of these sentences changes or removes its entry in the same commit. Where a test holds a sentence, or another text repeats it, the entry says so, because they change with it.
 
@@ -391,6 +391,7 @@ The other documents for readers:
 - `docs/support-matrix.md` "he is to look at it on screen before a release" and "The rest of that check, and a first apply to a real user profile, are still to come." wait for T12 as a whole.
 - `docs/support-matrix.md` "Not looked at in Windows Terminal yet." waits for T12 (1) and (2).
 - `docs/support-matrix.md` "sereno does not repaint there. Not looked at." waits for T12 (6), the terminal of VS Code.
+- `docs/support-matrix.md` "neither case has been tried on a machine" waits for T12 (1), and only if the stored execution policy on the owner's machine is `Restricted`: a Serena tab that opens there with its prompt is the first trial of the first of the two cases. Point (1) does not ask for the stored policy, so the sentence stays unless the record names it; the second case, a policy set by Group Policy, stays untried.
 - `docs/support-matrix.md` "A Documents folder kept in OneDrive has not been tried." waits for T12 (6), and only if the owner's Documents folder is kept in OneDrive: the apply of that point then finds the profile there.
 - `docs/support-matrix.md` "no one has looked at it" waits for T12 (6), the tab of the stock Windows PowerShell profile.
 - `docs/support-matrix.md` "the profile and the colour schemes of the fragment have not been looked at in any version yet" waits for T12 (1) and (2).
@@ -424,11 +425,13 @@ This specification:
 - `docs/spec-0.1.md` "T12 has not been run." waits for T12 as a whole: the section "What the owner saw on a screen" takes its record, point by point, and for point (0) the line `sereno version` printed and the SHA-256 of the program.
 - `docs/spec-0.1.md` "Not reported, and so still open" waits for T12 (1), (3) and (4), which look again at part of what the spike left open; the rest stays open.
 
-And the items of "Amendments before the acceptance test" that say "not seen" or that T12 looks. An amendment is not rewritten: what T12 showed for it is written into "What the owner saw on a screen", and its entry goes when that is done.
+And the items of "Amendments before the acceptance test" that say "not seen", "not tried" or "has not been run", or that T12 looks. An amendment is not rewritten: what T12 showed for it is written into "What the owner saw on a screen", and its entry goes when that is done.
 
 - `docs/spec-0.1.md` "T12 (1) now expects the home folder." and "Read in the source and not seen" wait for T12 (1).
+- `docs/spec-0.1.md` "`sereno apply` has not been run there." waits for T12 (1), the first `sereno apply` on the owner's machine.
 - `docs/spec-0.1.md` "is left as it is until T12 (2)" waits for T12 (2).
 - `docs/spec-0.1.md` "docs/support-matrix.md says so. Not seen on a screen." waits for T12 (4), which turns a contrast theme on in mode auto only.
 - `docs/spec-0.1.md` "unless the Windows PowerShell of point (6) turns out to be one", "None of it was seen in a real tab; T12 (6) now looks.", "it does not show whether the last command failed. Not seen on a screen." and "which was not looked up" wait for T12 (6).
+- `docs/spec-0.1.md` "Not tried: a real PowerShell under a stored Restricted policy." waits for T12 (6), and only if the apply of that point is refused: the record then says which policy PowerShell reported.
 - `docs/spec-0.1.md` "goes by what that theme says. Read in the source, not seen." waits for T12 (7), which shows what `sereno status` says of the theme setting on the owner's machine, and none of the other cases.
 - `docs/spec-0.1.md` "Read in the source, not seen; one case the wording does not cover" and "is painted for the first time at its next prompt. Not seen on a screen." wait for T12 (8).
