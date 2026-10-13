@@ -28,6 +28,8 @@ type remover struct {
 	ops  []Op
 	gone map[string]bool // paths the operations so far delete, by pathKey
 	kept map[string]bool // paths that are known to stay, by pathKey
+	// absent holds the hook records whose file was not there (Plan.GoneHooks).
+	absent []HookRecord
 }
 
 // glance is how long planning waits, on Windows, for a file it does not know
@@ -113,7 +115,7 @@ func planUninstall(req UninstallRequest) (*Plan, error) {
 		if !bytes.Equal(current, data) {
 			u.ops = append(u.ops, Op{Verb: VerbReplace, Path: manifestPath, act: writeOver(data, FilePerm, state.sum)})
 		}
-		plan.Ops = u.ops
+		plan.Ops, plan.GoneHooks = u.ops, u.absent
 		if err := stillAt(req.Root, state); err != nil {
 			return nil, err
 		}
@@ -150,7 +152,7 @@ func planUninstall(req UninstallRequest) (*Plan, error) {
 	}
 	u.rmdir(req.Root)
 
-	plan.Ops = u.ops
+	plan.Ops, plan.GoneHooks = u.ops, u.absent
 	if err := stillAt(req.Root, state); err != nil {
 		return nil, err
 	}
@@ -292,6 +294,10 @@ func (u *remover) hook(record HookRecord) bool {
 	}
 	if !p.exists {
 		// Gone already. If sereno had created it, its directories may go.
+		// Deleted or moved, that cannot be told from here, and a file that
+		// was moved has the line in it still: the plan notes the record, so
+		// that the command can say so.
+		u.absent = append(u.absent, record)
 		if record.FileCreated {
 			u.rmdirs(record.DirsCreated)
 		} else {

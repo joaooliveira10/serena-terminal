@@ -390,7 +390,7 @@ O `sereno uninstall` retira as linhas de hook que acrescentou, dos arquivos em q
 - a pasta `bin` dentro da pasta do sereno, quando foi o script de instalação que colocou o programa ali;
 - o backup de um arquivo de inicialização que você alterou depois que a linha de hook foi acrescentada.
 
-Ele procura uma linha de hook no arquivo em que ela foi registrada, e em nenhum outro lugar. Um arquivo de inicialização que mudou de lugar depois disso fica com a linha do sereno, e o uninstall não fala dela; a mudança da qual se espera isso é a de uma pasta Documentos para o OneDrive, com o perfil do PowerShell dentro.
+Ele procura uma linha de hook no arquivo em que ela foi registrada, e em nenhum outro lugar. Um arquivo de inicialização que mudou de lugar depois disso fica com a linha do sereno: o uninstall avisa que não há arquivo no lugar registrado, e não procura o que foi movido; a mudança da qual se espera isso é a de uma pasta Documentos para o OneDrive, com o perfil do PowerShell dentro.
 
 O [docs/uninstall.md](docs/uninstall.md) lista todos os casos.
 

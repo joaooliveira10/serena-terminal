@@ -235,6 +235,7 @@ func TestUninstallDocumentQuotesRealSentences(t *testing.T) {
 	for what, quoted := range map[string]string{
 		"the sentence about the entry of Windows Terminal": block(catalog.T("uninstall.remains.terminal") + "\n"),
 		"what a command says when it makes way":            block(Program + ": " + catalog.T("error.busy") + "\n"),
+		"what uninstall says of a hook whose file is gone": block(catalog.T("uninstall.remains.hook-file-gone", "powershell", `C:\Users\user\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1`) + "\n"),
 		"the profile of the object to add back":            `{ "guid": "` + winterminal.ProfileGUID() + `", "hidden": false, "name": "Serena", "source": "SerenaTerminal" }`,
 	} {
 		if !strings.Contains(text, quoted) {

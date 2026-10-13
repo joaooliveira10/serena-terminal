@@ -1474,8 +1474,15 @@ func TestRecordedHookWhoseFileIsGone(t *testing.T) {
 // leaves it, and the file, also one sereno itself had created, and its plan
 // names neither. Only when the line is taken out of the moved file between
 // the two commands does sereno add it itself, and take it back.
+//
+// What an uninstall does say (R39): when it finds no file in the recorded
+// place, it names the shell and that place, and says that the line may still
+// be in the file if it was moved. That is the uninstall right after the move
+// and the hook-only one of the way out, a dry run too; an uninstall that
+// finds its file says nothing of the kind.
 func TestUninstallAfterTheProfileMoved(t *testing.T) {
 	english := i18n.For(i18n.English)
+	const goneKey = "uninstall.remains.hook-file-gone"
 	// moved is a machine with a recorded hook whose Documents folder has
 	// gone into OneDrive, and a PowerShell that names the profile there.
 	// before is the profile as it was before sereno, "" when there was none.
@@ -1537,9 +1544,19 @@ func TestUninstallAfterTheProfileMoved(t *testing.T) {
 		{"a profile sereno created", true},
 	} {
 		t.Run(home.name+", uninstalled right after the move", func(t *testing.T) {
-			w, prober, _, now, before := moved(t, home.created)
+			w, prober, first, now, before := moved(t, home.created)
 			with := w.read(now)
+			tree := w.tree()
+			dry := w.must(0, "uninstall", "--dry-run", "--lang", "pt-BR")
+			if want := i18n.For(i18n.Portuguese).T(goneKey, "powershell", first); strings.Count(dry.out, want+"\n") != 1 {
+				t.Errorf("the dry run does not say once that the recorded file is gone (%q):\n%s", want, dry.out)
+			}
+			noMissingKey(t, dry.out)
+			sameTree(t, "uninstall --dry-run", tree, w.tree())
 			uninstall := w.must(0, "uninstall", "--lang", "en")
+			if want := english.T(goneKey, "powershell", first); strings.Count(uninstall.out, want+"\n") != 1 {
+				t.Errorf("the uninstall does not say once that the recorded file is gone (%q):\n%s", want, uninstall.out)
+			}
 			left(t, w, uninstall, now, with, before)
 			if prober.asked != 1 {
 				t.Errorf("the uninstall asked PowerShell (%d calls in all)", prober.asked)
@@ -1550,7 +1567,12 @@ func TestUninstallAfterTheProfileMoved(t *testing.T) {
 			w, _, first, now, before := moved(t, home.created)
 			with := w.read(now)
 			w.must(engine.ExitRefused, "apply")
-			w.must(0, "uninstall", "--hook", "powershell")
+			gone := english.T(goneKey, "powershell", first)
+			for _, args := range [][]string{{"uninstall", "--hook", "powershell", "--dry-run", "--lang", "en"}, {"uninstall", "--hook", "powershell", "--lang", "en"}} {
+				if out := w.must(0, args...).out; strings.Count(out, gone+"\n") != 1 {
+					t.Errorf("sereno %s does not say once that the recorded file is gone (%q):\n%s", strings.Join(args, " "), gone, out)
+				}
+			}
 			again := w.must(0, "apply", "--hook", "powershell", "--lang", "en")
 			if want := "keep    " + now + " (" + english.T(engine.NoteHookPresent) + ")"; !strings.Contains(again.out, want) {
 				t.Errorf("the plan of the second apply does not keep the line it found in the moved profile (%q):\n%s", want, again.out)
@@ -1559,6 +1581,9 @@ func TestUninstallAfterTheProfileMoved(t *testing.T) {
 				t.Errorf("a file was made again in the old place %s (%v)", first, err)
 			}
 			uninstall := w.must(0, "uninstall", "--lang", "en")
+			if strings.Contains(uninstall.out, engine.HookMarker) {
+				t.Errorf("the uninstall found its file, and says something about a hook line all the same:\n%s", uninstall.out)
+			}
 			left(t, w, uninstall, now, with, before)
 		})
 	}
@@ -1571,7 +1596,9 @@ func TestUninstallAfterTheProfileMoved(t *testing.T) {
 		if !strings.Contains(again.out, "append  "+now) || strings.Count(w.read(now), engine.HookMarker) != 1 {
 			t.Errorf("the second apply did not add the line to the moved profile itself:\n%s", again.out)
 		}
-		w.must(0, "uninstall")
+		if out := w.must(0, "uninstall", "--lang", "en").out; strings.Contains(out, english.T(goneKey, "powershell", now)) {
+			t.Errorf("the uninstall took the line out of its file, and says that the file is gone:\n%s", out)
+		}
 		if got := w.read(now); got != before {
 			t.Errorf("the moved profile is %q after the uninstall, want it as it was before sereno: %q", got, before)
 		}

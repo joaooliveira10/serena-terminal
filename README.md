@@ -390,7 +390,7 @@ Tier 1 means: the maintainer has it on his machine and it is tested there. Tier 
 - the `bin` folder inside sereno's folder, when the install script placed the program there;
 - the backup of a start-up file that you changed after the hook line was added.
 
-It looks for a hook line in the file the line was recorded in, and nowhere else. A start-up file that has moved since keeps sereno's line, and uninstall does not mention it; the move this is expected from is the one of a Documents folder into OneDrive, with the PowerShell profile in it.
+It looks for a hook line in the file the line was recorded in, and nowhere else. A start-up file that has moved since keeps sereno's line: uninstall says that no file is in the recorded place, and does not look for the one that moved; the move this is expected from is the one of a Documents folder into OneDrive, with the PowerShell profile in it.
 
 [docs/uninstall.md](docs/uninstall.md) lists every case.
 

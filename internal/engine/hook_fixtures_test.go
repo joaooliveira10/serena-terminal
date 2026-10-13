@@ -399,6 +399,9 @@ func TestHookLifecycles(t *testing.T) {
 				t.Errorf("the file is already clean but the plan has %s for it", op.Verb)
 			}
 		}
+		if len(plan.GoneHooks) != 0 {
+			t.Errorf("the file is there, and the plan lists it as gone: %+v", plan.GoneHooks)
+		}
 		sameTree(t, before, s.home.Dir, "after uninstall")
 	})
 
@@ -409,6 +412,18 @@ func TestHookLifecycles(t *testing.T) {
 		record, _ := m.Hook("bash")
 		if err := os.Remove(target); err != nil {
 			t.Fatal(err)
+		}
+		// Deleted or moved, planning cannot tell which: the plan notes the
+		// hook whose file is gone, for an uninstall of hook lines only and
+		// for a whole one, so that the command can say what it met.
+		for _, req := range []UninstallRequest{{Root: s.root, Version: "0.1.0", Shells: []string{"bash"}}, {Root: s.root}} {
+			planned, err := PlanUninstall(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(planned.GoneHooks) != 1 || planned.GoneHooks[0].Shell != "bash" || planned.GoneHooks[0].Path != target {
+				t.Errorf("uninstall of %v: the plan does not note the hook whose file is gone: %+v", req.Shells, planned.GoneHooks)
+			}
 		}
 		plan := mustUninstall(t, UninstallRequest{Root: s.root})
 		if plan.ExitCode() != ExitOK || plan.Count(VerbKeep) != 1 {

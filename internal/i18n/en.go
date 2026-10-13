@@ -116,6 +116,7 @@ var english = map[string]string{
 	// uninstall (R39), including what it does not take back.
 	"uninstall.nothing":                 "Nothing to remove: sereno has not been applied here (%s has no manifest).",
 	"uninstall.no-hook":                 "No hook line is recorded for %s.",
+	"uninstall.remains.hook-file-gone":  "The hook line for %[1]s was recorded in %[2]s, and no file is there now. If the file was moved, the line may still be in it: uninstall does not look for the file, and a line ending in `# sereno:hook` is then yours to delete.",
 	"uninstall.remains.terminal":        "Windows Terminal keeps the short entry it added for the Serena profile to its settings.json, and the profile's GUID in its state.json; sereno does not write those files. Leave the entry: once Windows Terminal has been closed and opened again, it is expected to leave Serena out of its new-tab menu and to go on listing it in its settings, as a profile that is no longer detected, with a button to delete it. If you delete the entry, a later reinstall stays hidden until the entry is added back.",
 	"uninstall.remains.bin":             "%s was left alone: it holds the program the install script placed there, and apply and uninstall never touch it.",
 	"uninstall.remains.program":         "The sereno program itself stays where it is: %s. Delete that file to remove it.",

@@ -217,6 +217,11 @@ type Plan struct {
 	Root     string
 	Ops      []Op
 	Refusals []Refusal
+	// GoneHooks lists, in the plan of an uninstall, the hook lines whose
+	// file was not there: nothing could be taken out of it, and no operation
+	// stands for it. Where the file went, planning cannot tell. One that was
+	// moved has taken the line along, so the command says what it met.
+	GoneHooks []HookRecord
 
 	// ledger is set on the plan of an apply: what Apply needs to correct the
 	// manifest when an operation fails.

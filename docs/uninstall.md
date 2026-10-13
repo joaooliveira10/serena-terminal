@@ -90,9 +90,15 @@ That is not an error: the exit code is 0. sereno's folder then remains with `bac
 
 ### A hook line in a start-up file that has moved
 
-Uninstall looks for a hook line in the file it was recorded in, and nowhere else. When that file is no longer there, it takes nothing out. For a file you deleted that is all there is to it. A file that was moved has taken the line along: it stays in the moved file, and uninstall does not mention it. Where the file was there before sereno, the copy of it stays in `backups`, as in the case above. The move this is expected from is the one of a Documents folder into OneDrive, which takes the PowerShell profile along; it has not been tried on a machine, only with a folder renamed in a test home.
+Uninstall looks for a hook line in the file it was recorded in, and nowhere else. When that file is no longer there, it takes nothing out, and after the plan it says so, with the shell and the recorded file:
 
-`sereno apply` refuses a profile that has moved and names `sereno uninstall --hook powershell`; after that, `sereno apply --hook powershell` goes by the file PowerShell names now. If sereno's line is still in that file, the apply keeps it, and from then on the line counts as one that was there before sereno: a later uninstall leaves it, and the file, also a file sereno itself had created, and says nothing about either. To avoid that, take the line out of the moved file between the two commands. sereno then adds it again itself, and uninstall takes it out again.
+```text
+The hook line for powershell was recorded in C:\Users\user\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1, and no file is there now. If the file was moved, the line may still be in it: uninstall does not look for the file, and a line ending in `# sereno:hook` is then yours to delete.
+```
+
+For a file you deleted that is all there is to it. A file that was moved has taken the line along, and it stays in the moved file; sereno cannot tell the two cases apart, which is why the sentence is the same for both and the exit code stays 0. Where the file was there before sereno, the copy of it stays in `backups`, as in the case above. The move this is expected from is the one of a Documents folder into OneDrive, which takes the PowerShell profile along; it has not been tried on a machine, only with a folder renamed in a test home.
+
+`sereno apply` refuses a profile that has moved and names `sereno uninstall --hook powershell`, which ends with the sentence above; after that, `sereno apply --hook powershell` goes by the file PowerShell names now. If sereno's line is still in that file, the apply keeps it, and from then on the line counts as one that was there before sereno: a later uninstall leaves it, and the file, also a file sereno itself had created, and says nothing about either. To avoid that, take the line out of the moved file between the two commands. sereno then adds it again itself, and uninstall takes it out again.
 
 A line that is left behind this way is yours to delete. Because it tests for sereno's file before loading it, it does nothing once sereno's files are gone.
 

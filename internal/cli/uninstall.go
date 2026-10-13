@@ -73,6 +73,7 @@ func runUninstall(r *run, p parsed) int {
 	// A dry run ends with the sentence of R13; a real run says first that it
 	// is done and then what it could not take back.
 	if dryRun {
+		r.uninstallGoneHooks(plan)
 		if !hooksOnly {
 			r.uninstallRemains(s, remembered)
 		}
@@ -80,11 +81,26 @@ func runUninstall(r *run, p parsed) int {
 		return code
 	}
 	r.closePlan(plan, false, left)
-	if !hooksOnly {
+	if !hooksOnly || len(plan.GoneHooks) > 0 {
 		r.say("")
+	}
+	r.uninstallGoneHooks(plan)
+	if !hooksOnly {
 		r.uninstallRemains(s, remembered)
 	}
 	return code
+}
+
+// uninstallGoneHooks says which hook lines an uninstall, whole or of hook
+// lines only, could not look for: the file the line was recorded in is not
+// there. A file the user deleted needs nothing more. One that was moved (a
+// PowerShell profile goes with its Documents folder) has the line in it
+// still, and sereno does not go looking for it: the sentence names the shell
+// and the recorded place and leaves the line to the user (R39).
+func (r *run) uninstallGoneHooks(plan *engine.Plan) {
+	for _, record := range plan.GoneHooks {
+		r.say(r.T("uninstall.remains.hook-file-gone", record.Shell, record.Path))
+	}
 }
 
 // terminalRemembers reports whether Windows Terminal will keep something of
