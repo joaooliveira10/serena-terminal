@@ -185,6 +185,30 @@ func TestReadmesSayWhatWindowsTerminalKeeps(t *testing.T) {
 	})
 }
 
+// TestReadmesSayWhichUninstallLeavesTheLineUnsaid: of a start-up file that
+// has moved, each README says two things. The uninstall that finds no file
+// in the recorded place says so. The uninstall that comes after the hook
+// was asked for again says nothing, although it leaves sereno's line too:
+// the apply found the line in the moved file, and what an apply finds was
+// there before sereno. The READMEs had the first half only and read as if
+// uninstall always spoke. What the program does on both paths is
+// TestUninstallAfterTheProfileMoved; this keeps both halves in both
+// languages.
+func TestReadmesSayWhichUninstallLeavesTheLineUnsaid(t *testing.T) {
+	expected := map[string][]string{
+		"en":    {"uninstall says that no file is in the recorded place", "a later uninstall leaves it and says nothing"},
+		"pt-BR": {"o uninstall avisa que não há arquivo no lugar registrado", "um uninstall posterior a deixa onde está e não diz nada"},
+	}
+	bothLanguages(t, func(t *testing.T, lang string) {
+		name, text := readme(t, lang)
+		for _, said := range expected[lang] {
+			if !strings.Contains(text, said) {
+				t.Errorf("%s does not say of a start-up file that has moved: %s", name, said)
+			}
+		}
+	})
+}
+
 // TestHelpSaysWhichSessionsInbandAlwaysReaches: `--inband always` repaints
 // the sessions that Windows Terminal started itself, which are the ones that
 // carry WT_SESSION; init.ps1 and `sereno` go by that variable and by nothing
