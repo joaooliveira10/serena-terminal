@@ -1593,6 +1593,17 @@ func TestUninstallAfterTheProfileMoved(t *testing.T) {
 			if want := i18n.For(i18n.Portuguese).T(goneKey, "powershell", first); strings.Count(dry.out, want+"\n") != 1 {
 				t.Errorf("the dry run does not say once that the recorded file is gone (%q):\n%s", want, dry.out)
 			}
+			// That expectation comes from the catalogue itself, so any text
+			// that takes those two arguments would meet it. What the
+			// Portuguese sentence has to say besides is held by its words,
+			// as for hook.missing: the line may still be in the file that
+			// moved, and it is then the user's to delete. The English
+			// sentence is quoted whole by docs/uninstall.md.
+			for _, said := range []string{"a linha pode continuar nele", "fica então para você apagar"} {
+				if !strings.Contains(dry.out, said) {
+					t.Errorf("the dry run in Portuguese does not say %q:\n%s", said, dry.out)
+				}
+			}
 			noMissingKey(t, dry.out)
 			keeps(t, w, "pt-BR", dry.out, first, before)
 			sameTree(t, "uninstall --dry-run", tree, w.tree())
@@ -1612,12 +1623,21 @@ func TestUninstallAfterTheProfileMoved(t *testing.T) {
 			with := w.read(now)
 			w.must(engine.ExitRefused, "apply")
 			gone := english.T(goneKey, "powershell", first)
+			hookOnly := ""
 			for _, args := range [][]string{{"uninstall", "--hook", "powershell", "--dry-run", "--lang", "en"}, {"uninstall", "--hook", "powershell", "--lang", "en"}} {
 				out := w.must(0, args...).out
 				if strings.Count(out, gone+"\n") != 1 {
 					t.Errorf("sereno %s does not say once that the recorded file is gone (%q):\n%s", strings.Join(args, " "), gone, out)
 				}
 				keeps(t, w, "en", out, first, before)
+				hookOnly = out
+			}
+			// The run that carries it out says first that it is done and
+			// then, after an empty line, what it could not look for, as a
+			// whole uninstall does with what it leaves. An uninstall of hook
+			// lines has that line only when there is such a sentence.
+			if want := english.T("plan.done") + "\n\n" + gone + "\n"; !strings.HasSuffix(hookOnly, want) {
+				t.Errorf("sereno uninstall --hook powershell does not end with %q:\n%s", want, hookOnly)
 			}
 			again := w.must(0, "apply", "--hook", "powershell", "--lang", "en")
 			if want := "keep    " + now + " (" + english.T(engine.NoteHookPresent) + ")"; !strings.Contains(again.out, want) {
@@ -1668,7 +1688,13 @@ func TestRecordedHookOfAShellThatIsGone(t *testing.T) {
 	if !strings.Contains(refused.err, "sereno uninstall --hook pwsh") {
 		t.Errorf("the refusal does not say how to withdraw the hook:\n%s", refused.err)
 	}
-	w.must(0, "uninstall", "--hook", "pwsh")
+	// The file of this hook is where it was recorded: the run has nothing to
+	// say after "Done.", and no empty line in front of nothing
+	// (TestUninstallAfterTheProfileMoved has the other case).
+	withdrawn := w.must(0, "uninstall", "--hook", "pwsh", "--lang", "en")
+	if done := i18n.For(i18n.English).T("plan.done") + "\n"; !strings.HasSuffix(withdrawn.out, done) {
+		t.Errorf("sereno uninstall --hook pwsh does not end with %q:\n%s", done, withdrawn.out)
+	}
 	w.must(0, "apply", "--shell", "powershell")
 }
 
