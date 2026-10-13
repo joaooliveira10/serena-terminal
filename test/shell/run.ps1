@@ -730,10 +730,22 @@ try {
                 'CommentColor', 'ErrorColor', 'EmphasisColor', 'SelectionColor', 'DefaultTokenColor', 'ContinuationPromptColor'
             $colours = { $options = Get-PSReadLineOption; @(foreach ($name in $names) { $name + '=' + (Show ([string]$options.$name)) }) -join ' ' }
             $before = & $colours
+            # The three colours of the prediction views are newer than the
+            # fifteen (PSReadLine 2.1 and 2.2). init.ps1 sets each of them
+            # where its property exists, and in a plain console none, while
+            # keys=always may still switch the predictions themselves on:
+            # their colour is then the one PSReadLine chose.
+            $later = 'InlinePredictionColor', 'ListPredictionColor', 'ListPredictionSelectedColor'
+            $laterBefore = @{}
+            foreach ($name in $later) { if ((Get-PSReadLineOption).PSObject.Properties[$name]) { $laterBefore[$name] = Show ([string](Get-PSReadLineOption).$name) } }
             $run = Capture { . $T.Init }
             Check ($run.Console -eq '' -and $run.Output.Count -eq 0 -and $Error.Count -eq 0) 'init.ps1 prints nothing there and nothing in it fails' ($(if ($Error.Count) { [string]$Error[0] }))
             Check ($global:__sereno['Plain'] -and -not $global:__sereno['Terminal']) 'the session knows that it writes no colour'
             CheckEqual (& $colours) $before 'the line editor keeps the fifteen colours it had'
+            foreach ($name in $later) {
+                if ($laterBefore.ContainsKey($name)) { CheckEqual (Show ([string](Get-PSReadLineOption).$name)) $laterBefore[$name] "and its $name, which is not a slot colour either" }
+                else { Check $true "PSReadLine $((Get-Module PSReadLine).Version) has no $name to keep" }
+            }
             if ($styled) {
                 CheckEqual (& $styles) $stylesBefore 'a $PSStyle keeps every style it had, those that paint a background too'
                 CheckEqual $PSStyle.FileInfo.Directory ($E + '[44;1m') 'and directories stay as PowerShell lists them, bold on a blue background'
