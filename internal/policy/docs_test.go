@@ -408,3 +408,77 @@ func TestDocumentsNeverPipeADownloadIntoAShell(t *testing.T) {
 		}
 	}
 }
+
+// specification is the working contract of version 0.1.
+const specification = "docs/spec-0.1.md"
+
+// waitingForT12 heads the last section of the specification: the sentences
+// of the repository that are to change only after the acceptance test T12
+// has been run, each with the point of T12 it waits for.
+const waitingForT12 = "\n## Sentences that wait for T12\n"
+
+// TestSentencesThatWaitForT12AreWhereTheListSaysTheyAre reads that list. An
+// entry is one list item: a file between backticks, a few words of the
+// sentence between double quotes (more words, or another file with its own
+// words, may follow), then "waits for" and the point of T12. The words are
+// the address of the sentence, so they must stand in the file the entry
+// names, once; an entry of the specification itself is looked for above the
+// list. A list that named lines by number was overtaken by the next commits
+// that touched those files: a sentence that is changed without its entry now
+// fails here, and so does an entry that names a line number or no point.
+func TestSentencesThatWaitForT12AreWhereTheListSaysTheyAre(t *testing.T) {
+	text := repositoryText(t, specification)
+	start := strings.Index(text, waitingForT12)
+	if start < 0 {
+		t.Fatalf("%s has no section %q", specification, strings.TrimSpace(waitingForT12))
+	}
+	above, list := text[:start], text[start+len(waitingForT12):]
+	if strings.Contains(list, "\n## ") {
+		t.Errorf("%q is not the last section of %s", strings.TrimSpace(waitingForT12), specification)
+	}
+	waits := regexp.MustCompile(` waits? for `)
+	token := regexp.MustCompile("`([^`\n]+)`|\"([^\"\n]+)\"")
+	lineNumber := regexp.MustCompile(`\.[a-z0-9]+:[0-9]`)
+	for _, entry := range strings.Split(list, "\n") {
+		if !strings.HasPrefix(entry, "- ") {
+			continue
+		}
+		if lineNumber.MatchString(entry) {
+			t.Errorf("an entry names a line by its number, which the next commit moves: %s", entry)
+		}
+		cut := waits.FindStringIndex(entry)
+		if cut == nil || !strings.Contains(entry[cut[1]:], "T12") {
+			t.Errorf("an entry does not say which point of T12 it waits for: %s", entry)
+			continue
+		}
+		var files []string
+		afterWords, quoted := true, 0
+		for _, match := range token.FindAllStringSubmatch(entry[:cut[0]], -1) {
+			if file := match[1]; file != "" {
+				// A file after words starts the next group of the entry.
+				if afterWords {
+					files = nil
+				}
+				files, afterWords = append(files, file), false
+				continue
+			}
+			afterWords = true
+			quoted++
+			if len(files) == 0 {
+				t.Errorf("an entry quotes words before it names their file: %s", entry)
+			}
+			for _, file := range files {
+				in := above
+				if file != specification {
+					in = repositoryText(t, file)
+				}
+				if found := strings.Count(in, match[2]); found != 1 {
+					t.Errorf("%s has the words %q %d times, and the list of sentences that wait for T12 names them as the address of one sentence: change or remove the entry together with the sentence", file, match[2], found)
+				}
+			}
+		}
+		if quoted == 0 {
+			t.Errorf("an entry quotes no words of its sentence: %s", entry)
+		}
+	}
+}
