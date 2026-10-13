@@ -383,12 +383,14 @@ Tier 1 means: the maintainer has it on his machine and it is tested there. Tier 
 
 ## Uninstall, and what remains
 
-`sereno uninstall` removes the hook lines it added, deletes every file it wrote that is still as it wrote it, and removes the folders it created. A file you edited afterwards is left where it is and reported (exit code 4). What it does not remove, and says so when it applies:
+`sereno uninstall` takes the hook lines it added out of the files it added them to, deletes every file it wrote that is still as it wrote it, and removes the folders it created. A file you edited afterwards is left where it is and reported (exit code 4). What it does not remove, and says so when it applies:
 
 - the entry Windows Terminal itself added for the Serena profile to its `settings.json`, and the profile's identifier in its `state.json`. sereno does not write those files. Leave the entry: once Windows Terminal has been closed and opened again, it is expected to leave Serena out of its new-tab menu and to go on listing it in its settings, as a profile that is no longer detected (read from the source code of version 1.24, not seen yet);
 - the sereno program;
 - the `bin` folder inside sereno's folder, when the install script placed the program there;
 - the backup of a start-up file that you changed after the hook line was added.
+
+It looks for a hook line in the file the line was recorded in, and nowhere else. A start-up file that has moved since keeps sereno's line, and uninstall does not mention it; the move this is expected from is the one of a Documents folder into OneDrive, with the PowerShell profile in it.
 
 [docs/uninstall.md](docs/uninstall.md) lists every case.
 

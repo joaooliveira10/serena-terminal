@@ -383,12 +383,14 @@ O [docs/support-matrix.md](docs/support-matrix.md) traz os detalhes, incluindo o
 
 ## Desinstalação, e o que fica
 
-O `sereno uninstall` retira as linhas de hook que acrescentou, apaga cada arquivo que gravou e que continua como ele gravou, e remove as pastas que criou. Um arquivo que você editou depois fica onde está e é informado (código de saída 4). O que ele não remove, e avisa quando é o caso:
+O `sereno uninstall` retira as linhas de hook que acrescentou, dos arquivos em que as colocou, apaga cada arquivo que gravou e que continua como ele gravou, e remove as pastas que criou. Um arquivo que você editou depois fica onde está e é informado (código de saída 4). O que ele não remove, e avisa quando é o caso:
 
 - a entrada que o próprio Windows Terminal acrescentou ao `settings.json` dele para o perfil Serena, e o identificador do perfil no `state.json` dele. O sereno não grava esses arquivos. Deixe a entrada: depois que o Windows Terminal for fechado e aberto de novo, o esperado é que ele tire o Serena do menu de nova aba e continue a listá-lo nas configurações, como um perfil que não é mais detectado (lido no código-fonte da versão 1.24, ainda não visto);
 - o programa sereno;
 - a pasta `bin` dentro da pasta do sereno, quando foi o script de instalação que colocou o programa ali;
 - o backup de um arquivo de inicialização que você alterou depois que a linha de hook foi acrescentada.
+
+Ele procura uma linha de hook no arquivo em que ela foi registrada, e em nenhum outro lugar. Um arquivo de inicialização que mudou de lugar depois disso fica com a linha do sereno, e o uninstall não fala dela; a mudança da qual se espera isso é a de uma pasta Documentos para o OneDrive, com o perfil do PowerShell dentro.
 
 O [docs/uninstall.md](docs/uninstall.md) lista todos os casos.
 

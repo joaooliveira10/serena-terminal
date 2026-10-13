@@ -6,7 +6,7 @@
 
 sereno keeps a record, `manifest.json` in its own folder, of every file and folder it wrote. Uninstall goes by that record, in this order:
 
-1. **Hook lines.** For each start-up file sereno added a line to, it removes exactly the bytes it added, where they still stand as whole lines. If they do not (you commented the line out, indented it, or the file's line endings changed), it removes every line that ends with ` # sereno:hook`, and nothing else. A start-up file that sereno itself created and that is now empty is deleted, with the folders sereno created for it. If the file is then byte for byte what it was before the hook line, the backup copy is deleted too.
+1. **Hook lines.** For each start-up file sereno added a line to, it removes exactly the bytes it added, where they still stand as whole lines. If they do not (you commented the line out, indented it, or the file's line endings changed), it removes every line that ends with ` # sereno:hook`, and nothing else. A start-up file that sereno itself created and that is now empty is deleted, with the folders sereno created for it. If the file is then byte for byte what it was before the hook line, the backup copy is deleted too. Uninstall looks in the file the line was recorded in, and nowhere else; a file that has moved since is a case of its own, further down.
 2. **sereno's own files.** Each file sereno wrote is deleted if it is still what sereno wrote (its SHA-256 matches the record): the three session files, the Windows Terminal fragment, and the theme files of `sereno export`.
 3. **The rest of its folder.** The settings file `mode` and `manifest.json` are deleted, then `backups` if it is empty, then every folder sereno created, newest first, each only if it is empty, and finally sereno's own folder if it is empty.
 
@@ -44,7 +44,7 @@ This was a dry run. Run the same command without --dry-run to carry it out.
 Nothing was changed.
 ```
 
-When nothing was edited in between, the result is that every file sereno created is gone, every start-up file it touched is byte for byte what it was, and the folders it created are gone. The tests of this repository compare a checksum listing of a whole home folder before the first apply and after the uninstall. A session that was open during the uninstall keeps sereno's prompt and line-editor colours until it is closed: it has loaded them. Its palette goes by the default settings from its next prompt on, because the settings file is gone: a Serena tab that ran with `--flavor vivid` or with a fixed mode changes to what `auto` and `soft` give, and a session of another profile that was painted under `--inband always` hands the palette back to the colour scheme of its profile. That is how the tests of `init.ps1` find it, with the palette captured; it has not been seen on a screen.
+When nothing was edited or moved in between, the result is that every file sereno created is gone, every start-up file it touched is byte for byte what it was, and the folders it created are gone. The tests of this repository compare a checksum listing of a whole home folder before the first apply and after the uninstall. A session that was open during the uninstall keeps sereno's prompt and line-editor colours until it is closed: it has loaded them. Its palette goes by the default settings from its next prompt on, because the settings file is gone: a Serena tab that ran with `--flavor vivid` or with a fixed mode changes to what `auto` and `soft` give, and a session of another profile that was painted under `--inband always` hands the palette back to the colour scheme of its profile. That is how the tests of `init.ps1` find it, with the palette captured; it has not been seen on a screen.
 
 `sereno uninstall --hook LIST` does only step 1, for the shells you name (`powershell`, `pwsh`, `bash`, `zsh`), and keeps everything else installed.
 
@@ -87,6 +87,14 @@ Before sereno first adds a line to an existing start-up file, it copies the file
 ```
 
 That is not an error: the exit code is 0. sereno's folder then remains with `backups` in it; delete it when you no longer want the copy. One side effect: the folders sereno created above its own folder (on a new Linux home, `~/.local` and `~/.local/share`) are no longer recorded after such an uninstall. If you apply and uninstall again later, they stay behind as empty folders.
+
+### A hook line in a start-up file that has moved
+
+Uninstall looks for a hook line in the file it was recorded in, and nowhere else. When that file is no longer there, it takes nothing out. For a file you deleted that is all there is to it. A file that was moved has taken the line along: it stays in the moved file, and uninstall does not mention it. Where the file was there before sereno, the copy of it stays in `backups`, as in the case above. The move this is expected from is the one of a Documents folder into OneDrive, which takes the PowerShell profile along; it has not been tried on a machine, only with a folder renamed in a test home.
+
+`sereno apply` refuses a profile that has moved and names `sereno uninstall --hook powershell`; after that, `sereno apply --hook powershell` goes by the file PowerShell names now. If sereno's line is still in that file, the apply keeps it, and from then on the line counts as one that was there before sereno: a later uninstall leaves it, and the file, also a file sereno itself had created, and says nothing about either. To avoid that, take the line out of the moved file between the two commands. sereno then adds it again itself, and uninstall takes it out again.
+
+A line that is left behind this way is yours to delete. Because it tests for sereno's file before loading it, it does nothing once sereno's files are gone.
 
 ### The entry Windows Terminal wrote
 

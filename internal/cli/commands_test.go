@@ -1249,7 +1249,12 @@ func TestApplyAsksPowerShellOnlyWhenItMust(t *testing.T) {
 // machine of its own, so that a step that fails ends that case and no other.
 func recordedHook(t *testing.T) (w *world, prober *fakeProber, first string) {
 	t.Helper()
-	w = newWorld(t, platform.Windows, "wt-present")
+	return recordedHookOn(t, newWorld(t, platform.Windows, "wt-present"))
+}
+
+// recordedHookOn is recordedHook on a machine the caller has prepared.
+func recordedHookOn(t *testing.T, w *world) (_ *world, prober *fakeProber, first string) {
+	t.Helper()
 	first = w.home.PSProfile
 	prober = &fakeProber{result: shells.ProbeResult{ProfilePath: first, Policy: "RemoteSigned"}}
 	w.prober = prober
@@ -1350,7 +1355,8 @@ func TestRecordedHookWhoseFileIsGone(t *testing.T) {
 
 		// The way out the refusal names, and the hook asked for again: the
 		// line is looked after where PowerShell reads it, once, and nothing
-		// is made in the old place.
+		// is made in the old place. What that ends in at the uninstall is
+		// TestUninstallAfterTheProfileMoved.
 		w.must(0, "uninstall", "--hook", "powershell")
 		again := w.must(0, "apply", "--hook", "powershell")
 		if !strings.Contains(again.out, moved) {
@@ -1450,6 +1456,128 @@ func TestRecordedHookWhoseFileIsGone(t *testing.T) {
 		}
 		noMissingKey(t, refused.err)
 		sameTree(t, "a refused apply", tree, w.tree())
+	})
+}
+
+// TestUninstallAfterTheProfileMoved is where a profile that has moved ends,
+// at the uninstall. The rule that uninstall takes back exactly what apply
+// wrote does not hold there, and the documents say so (docs/uninstall.md,
+// docs/support-matrix.md, both READMEs): this test is what holds them to it.
+//
+// A Documents folder that moves takes the profile along, with sereno's line
+// in it. Uninstall looks for the line in the file the manifest records, and
+// nowhere else, so an uninstall right after the move leaves the line in the
+// moved file. The way out an apply names (`sereno uninstall --hook
+// powershell`, then `sereno apply --hook powershell`) ends in the same: the
+// apply finds the line in the file PowerShell names now, keeps it, and what
+// an apply finds in a file was there before sereno (R22), so the uninstall
+// leaves it, and the file, also one sereno itself had created, and its plan
+// names neither. Only when the line is taken out of the moved file between
+// the two commands does sereno add it itself, and take it back.
+func TestUninstallAfterTheProfileMoved(t *testing.T) {
+	english := i18n.For(i18n.English)
+	// moved is a machine with a recorded hook whose Documents folder has
+	// gone into OneDrive, and a PowerShell that names the profile there.
+	// before is the profile as it was before sereno, "" when there was none.
+	moved := func(t *testing.T, created bool) (w *world, prober *fakeProber, first, now, before string) {
+		t.Helper()
+		w = newWorld(t, platform.Windows, "wt-present")
+		documents := filepath.Join(w.home.Dir, "Documents")
+		if created {
+			if err := os.RemoveAll(documents); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			before = w.read(w.home.PSProfile)
+		}
+		w, prober, first = recordedHookOn(t, w)
+		oneDrive := filepath.Join(w.home.Dir, "OneDrive")
+		if err := os.Mkdir(oneDrive, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(documents, filepath.Join(oneDrive, "Documents")); err != nil {
+			t.Fatal(err)
+		}
+		now = filepath.Join(oneDrive, "Documents", "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1")
+		prober.result = shells.ProbeResult{ProfilePath: now, Policy: "RemoteSigned"}
+		return w, prober, first, now, before
+	}
+	// left checks what an uninstall left behind: the moved profile as it
+	// was, sereno's line in it, without a word about it in the plan; and of
+	// sereno's folder the copy of a profile that was there before sereno,
+	// or nothing at all.
+	left := func(t *testing.T, w *world, uninstall result, now, with, before string) {
+		t.Helper()
+		if got := w.read(now); got != with || strings.Count(got, engine.HookMarker) != 1 {
+			t.Errorf("the moved profile is %q after the uninstall, want it as it was, with sereno's line: %q", got, with)
+		}
+		if strings.Contains(uninstall.out+uninstall.err, now) {
+			t.Errorf("the uninstall names the moved profile, which the documents say it does not look for:\n%s", uninstall.out)
+		}
+		noMissingKey(t, uninstall.out, uninstall.err)
+		backups, err := os.ReadDir(filepath.Join(w.root(), engine.BackupsDir))
+		if before == "" {
+			if _, err := os.Lstat(w.root()); !os.IsNotExist(err) {
+				t.Errorf("sereno's folder is still there after the uninstall (%v)", err)
+			}
+			return
+		}
+		if err != nil || len(backups) != 1 {
+			t.Fatalf("backups holds %d files (%v), want the one copy of the profile", len(backups), err)
+		}
+		if got := w.read(filepath.Join(w.root(), engine.BackupsDir, backups[0].Name())); got != before {
+			t.Errorf("the copy in backups is %q, want the profile as it was before sereno: %q", got, before)
+		}
+	}
+	for _, home := range []struct {
+		name    string
+		created bool
+	}{
+		{"a profile that was there before sereno", false},
+		{"a profile sereno created", true},
+	} {
+		t.Run(home.name+", uninstalled right after the move", func(t *testing.T) {
+			w, prober, _, now, before := moved(t, home.created)
+			with := w.read(now)
+			uninstall := w.must(0, "uninstall", "--lang", "en")
+			left(t, w, uninstall, now, with, before)
+			if prober.asked != 1 {
+				t.Errorf("the uninstall asked PowerShell (%d calls in all)", prober.asked)
+			}
+		})
+
+		t.Run(home.name+", uninstalled after the way out", func(t *testing.T) {
+			w, _, first, now, before := moved(t, home.created)
+			with := w.read(now)
+			w.must(engine.ExitRefused, "apply")
+			w.must(0, "uninstall", "--hook", "powershell")
+			again := w.must(0, "apply", "--hook", "powershell", "--lang", "en")
+			if want := "keep    " + now + " (" + english.T(engine.NoteHookPresent) + ")"; !strings.Contains(again.out, want) {
+				t.Errorf("the plan of the second apply does not keep the line it found in the moved profile (%q):\n%s", want, again.out)
+			}
+			if _, err := os.Lstat(first); !os.IsNotExist(err) {
+				t.Errorf("a file was made again in the old place %s (%v)", first, err)
+			}
+			uninstall := w.must(0, "uninstall", "--lang", "en")
+			left(t, w, uninstall, now, with, before)
+		})
+	}
+
+	t.Run("the line is deleted from the moved profile on the way out", func(t *testing.T) {
+		w, _, _, now, before := moved(t, false)
+		w.must(0, "uninstall", "--hook", "powershell")
+		w.write(now, before)
+		again := w.must(0, "apply", "--hook", "powershell", "--lang", "en")
+		if !strings.Contains(again.out, "append  "+now) || strings.Count(w.read(now), engine.HookMarker) != 1 {
+			t.Errorf("the second apply did not add the line to the moved profile itself:\n%s", again.out)
+		}
+		w.must(0, "uninstall")
+		if got := w.read(now); got != before {
+			t.Errorf("the moved profile is %q after the uninstall, want it as it was before sereno: %q", got, before)
+		}
+		if _, err := os.Lstat(w.root()); !os.IsNotExist(err) {
+			t.Errorf("sereno's folder is still there after the uninstall (%v)", err)
+		}
 	})
 }
 
