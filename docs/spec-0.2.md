@@ -255,7 +255,7 @@ The two READMEs are restructured only after T12, because the sentences of the li
 ## Open after 0.2
 
 - The next feature to leave if a budget is missed at step 4 of the order of work, or is still missed when every item of the cut order that has code in the session files is out (the owner names it, from the figures of T9 (5)); and whether the rules of the cut order, which are this text's reading, are his.
-- Whether sereno recommends installing other tools at all, with winget lines for missing ones; 0.2 prints only the command of R51.
+- Whether sereno recommends installing other tools at all, with winget lines for missing ones; 0.2 prints no install command beyond the pwsh.absent one of 0.1 and the one of R51.
 - What a screen shows of fzf in the slots, of delta's diff colours and of a Starship preset, before any of them comes in.
 - A threshold or a switch for the bell, as a later line of the mode file; R59 prepares it.
 - OSC 777 notifications, once a stable Windows Terminal accepts them (only the 1.26 Preview did on 2026-10-14).
