@@ -45,7 +45,7 @@ var portuguese = map[string]string{
 
 	// O que o apply diz sobre o Windows Terminal (R19).
 	"wt.notice.stub": "Na primeira vez que vê o perfil Serena, o Windows Terminal adiciona uma entrada curta para ele ao settings.json dele mesmo, como faz com todo perfil de fragmento. O sereno não grava esse arquivo. Use --no-profile para instalar só os esquemas de cores.",
-	"wt.notice.open": "Feche todas as janelas do Windows Terminal, abra o Windows Terminal de novo e escolha Serena no menu de nova aba. O esperado é que mais uma janela de um Windows Terminal que já está aberto não mostre o que este apply mudou.",
+	"wt.notice.open": "Abra uma nova janela do Windows Terminal, mesmo que ele já esteja aberto, e escolha Serena no menu de nova aba dela. Se o Serena não estiver na lista, ou não mostrar o que este apply mudou, feche todas as janelas do Windows Terminal e abra o Windows Terminal de novo.",
 
 	// Saída do plano nos comandos (R13, R14).
 	"plan.summary":       "Total: %s.",

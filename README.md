@@ -149,7 +149,7 @@ For every command: `--lang en|pt-BR` chooses the language of the messages (other
 
 ### apply
 
-Writes the files of the plan, and ends by saying what comes next. On Windows with Windows Terminal: "Close every Windows Terminal window, open Windows Terminal again and choose Serena in the new-tab menu. One more window of a Windows Terminal that is already running is not expected to show what this apply changed." What this says about Windows Terminal is read from the source code of version 1.24.12741.0; the step has not been tried on a real machine yet (see Status). On macOS and Linux: "Nothing loads these files yet. To use them, let sereno add one line to your shell's start-up file: `sereno apply --hook bash` (or zsh, pwsh)."
+Writes the files of the plan, and ends by saying what comes next. On Windows with Windows Terminal: "Open a new Windows Terminal window, also one of a Windows Terminal that is already running, and choose Serena in its new-tab menu. If Serena is not listed there, or does not show what this apply changed, close every Windows Terminal window and open Windows Terminal again." On the maintainer's machine, in the acceptance test of 2026-10-14, a new window of a Windows Terminal that was running during the apply listed Serena, by his report. The source code of version 1.24.12741.0 had led to expect the opposite, which is why the advice to close every window stays. On macOS and Linux: "Nothing loads these files yet. To use them, let sereno add one line to your shell's start-up file: `sereno apply --hook bash` (or zsh, pwsh)."
 
 The command can be run again at any time; a second run finds everything as wanted:
 

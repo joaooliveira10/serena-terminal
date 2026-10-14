@@ -1047,7 +1047,7 @@ func TestApplyNotices(t *testing.T) {
 		// A fragment that is written again says it again. It is replaced
 		// then, not created: a Windows Terminal that is running lists Serena
 		// already, as the profile was before, which is why the second
-		// sentence speaks of what the apply changed and not of a profile
+		// sentence speaks of what the apply changed as well as of a profile
 		// that is not listed.
 		w.program("pwsh.exe")
 		replaced := w.must(0, "apply", "--shell", "pwsh", "--lang", lang)
