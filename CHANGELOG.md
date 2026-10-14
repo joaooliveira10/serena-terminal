@@ -31,4 +31,4 @@ Nothing has been released yet. This section describes version 0.1 as the code st
 
 ### Known limits
 
-See [docs/support-matrix.md](docs/support-matrix.md). The main ones: no detection of the system's appearance on macOS and Linux; a new Serena tab is repainted at its first prompt, not before; Windows Terminal adds an entry of its own to its settings for the Serena profile, which sereno neither writes nor removes; the programs are not signed.
+See [docs/support-matrix.md](docs/support-matrix.md). The main ones: no detection of the system's appearance on macOS and Linux; a new Serena tab is repainted at its first prompt, not before; Windows Terminal adds an entry of its own to its settings for the Serena profile, which sereno neither writes nor removes; after `sereno uninstall`, a Serena scheme that you chose yourself in Windows Terminal's settings makes Windows Terminal report an invalid colorScheme at every start until that name is taken out (see docs/uninstall.md); the programs are not signed.
