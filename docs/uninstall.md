@@ -1,6 +1,6 @@
 # Uninstall
 
-`sereno uninstall` is the undo of `sereno apply`. This page says exactly what it removes, what it leaves, and why. The examples are the output of real runs in a test home folder, which is shown as the home of a user named `user`. Version 0.1 is not released yet, and what Windows Terminal does on its side has not been observed on a real machine yet; those sentences are marked.
+`sereno uninstall` is the undo of `sereno apply`. This page says exactly what it removes, what it leaves, and why. The examples are the output of real runs in a test home folder, which is shown as the home of a user named `user`. Version 0.1 is not released yet. What Windows Terminal does on its side was read from its source code; the acceptance test of 2026-10-14 on the maintainer's machine looked at part of it, and the sentences say which part, and whether it was measured or is his report.
 
 ## What it removes
 
@@ -44,7 +44,7 @@ This was a dry run. Run the same command without --dry-run to carry it out.
 Nothing was changed.
 ```
 
-When nothing was edited or moved in between, the result is that every file sereno created is gone, every start-up file it touched is byte for byte what it was, and the folders it created are gone. The tests of this repository compare a checksum listing of a whole home folder before the first apply and after the uninstall. A session that was open during the uninstall keeps sereno's prompt and line-editor colours until it is closed: it has loaded them. Its palette goes by the default settings from its next prompt on, because the settings file is gone: a Serena tab that ran with `--flavor vivid` or with a fixed mode changes to what `auto` and `soft` give, a Serena tab that ran with `--inband off`, and so was never painted, is painted for the first time, and a session of another profile that was painted under `--inband always` hands the palette back to the colour scheme of its profile. That is how the tests of `init.ps1` find it, with the palette captured; it has not been seen on a screen.
+When nothing was edited or moved in between, the result is that every file sereno created is gone, every start-up file it touched is byte for byte what it was, and the folders it created are gone. The tests of this repository compare a checksum listing of a whole home folder before the first apply and after the uninstall. A session that was open during the uninstall keeps sereno's prompt and line-editor colours until it is closed: it has loaded them. Its palette goes by the default settings from its next prompt on, because the settings file is gone: a Serena tab that ran with `--flavor vivid` or with a fixed mode changes to what `auto` and `soft` give, a Serena tab that ran with `--inband off`, and so was never painted, is painted for the first time, and a session of another profile that was painted under `--inband always` hands the palette back to the colour scheme of its profile. That is how the tests of `init.ps1` find it, with the palette captured. In the acceptance test of 2026-10-14 a Serena tab that ran with `--flavor vivid` was open during the uninstall, and what it showed at its next prompt was not reported, so none of this has been seen on a screen.
 
 `sereno uninstall --hook LIST` does only step 1, for the shells you name (`powershell`, `pwsh`, `bash`, `zsh`), and keeps everything else installed.
 
@@ -104,19 +104,25 @@ A line that is left behind this way is yours to delete. Because it tests for ser
 
 ### The entry Windows Terminal wrote
 
-sereno writes one file for Windows Terminal, the fragment, and removes it. It never writes Windows Terminal's own `settings.json` or `state.json`. Windows Terminal does: the first time it sees a profile that comes from a fragment, it adds a short entry for it to `settings.json` and notes the profile's identifier in `state.json`. When either file holds that, or cannot be read, uninstall ends with this:
+sereno writes one file for Windows Terminal, the fragment, and removes it. It never writes Windows Terminal's own `settings.json` or `state.json`. Windows Terminal does: the first time it sees a profile that comes from a fragment, it adds a short entry for it to `settings.json` and notes the profile's identifier in `state.json`, where it also changes the value `settingsHash`. On the maintainer's machine, in the acceptance test of 2026-10-14, a comparison of the two files before and after measured just that: the entry appended to `profiles.list` with the rest of the JSON unchanged, and the identifier added to `generatedProfiles`. When either file holds that, or cannot be read, uninstall ends with this:
 
 ```text
 Windows Terminal keeps the short entry it added for the Serena profile to its settings.json, and the profile's GUID in its state.json; sereno does not write those files. Leave the entry: once Windows Terminal has been closed and opened again, it is expected to leave Serena out of its new-tab menu and to go on listing it in its settings, as a profile that is no longer detected, with a button to delete it. If you delete the entry, a later reinstall stays hidden until the entry is added back.
 ```
 
-What that means in practice. This paragraph describes Windows Terminal's side as read from its source code for version 1.24.12741.0; none of it has been observed on a machine yet.
+What that means in practice. This describes Windows Terminal's side as read from its source code for version 1.24.12741.0 and, where it says so, what the maintainer reported from his machine in the acceptance test of 2026-10-14.
 
-- A Windows Terminal that is running during the uninstall is expected to go on offering Serena in its new-tab menu until it loads its settings again, which it does when it starts: close every Windows Terminal window and open it again. Choosing Serena before that starts PowerShell with a file that is no longer there.
-- After that the profile is expected to be gone from the new-tab menu, and the six colour schemes with it. The entry remains in `settings.json`, and the settings of Windows Terminal go on listing Serena, with a warning sign, on a page that says the profile is no longer detected and has a button to delete it. Leave that button alone, for the reason of the next point. A command line that names the profile (`wt -p Serena`) still finds the entry and opens a tab from it, with Windows Terminal's default command and nothing of sereno's.
+- A Windows Terminal that is running during the uninstall is expected, by its source, to go on offering Serena in its new-tab menu until it loads its settings again: close every Windows Terminal window and open it again. The same reading expected a new window not to list Serena after an apply, and on the maintainer's machine one did, by his report ([support-matrix.md](support-matrix.md) has it); what a running Windows Terminal offered after the uninstall was not recorded. Choosing Serena from a menu that still offers it starts PowerShell with a file that is no longer there.
+- After that the profile is gone from the new-tab menu, and the six colour schemes with it. The entry remains in `settings.json`, and the settings of Windows Terminal go on listing Serena, on a page that says the profile is no longer detected. The maintainer reported this from his machine after an uninstall and a restart of Windows Terminal; his Windows Terminal, in Portuguese, listed the profile as "Perfil não detectado". By the source the entry also has a warning sign there and the page a button to delete it; those were not recorded. Leave that button alone, for the reason of the next point. By the source, a command line that names the profile (`wt -p Serena`) still finds the entry and opens a tab from it, with Windows Terminal's default command and nothing of sereno's; that was not tried.
 - If you delete the entry and later apply sereno again, Windows Terminal treats the profile as one you deleted and keeps it hidden. `sereno status` recognises this (`wt.profile-suppressed`) and prints the object to add back to `profiles.list`: `{ "guid": "{6b2d8b49-31d3-5dea-9087-93c26e1a033e}", "hidden": false, "name": "Serena", "source": "SerenaTerminal" }`.
-- When Windows Terminal adds its entry, it writes its whole `settings.json` again. Comments and your own formatting in that file may not survive that. This is true of every fragment profile, not only of sereno's.
+- When Windows Terminal adds its entry, it writes its whole `settings.json` again, by its source, so comments and your own formatting in that file may not survive that. This is true of every fragment profile, not only of sereno's. On the maintainer's machine the comparison of the file before and after found the entry appended and the rest of the JSON unchanged.
 - `sereno apply --no-profile` installs the six colour schemes without a profile. Windows Terminal then has no profile to add an entry for.
+
+### A Serena colour scheme you chose in Windows Terminal's settings
+
+If you chose one of the six Serena colour schemes for a profile in Windows Terminal's settings, the Serena profile or any other, that choice is yours: Windows Terminal wrote it into its own `settings.json` (as `"colorScheme": "Serena Dark Vivid"`, for instance), and sereno does not know about it: uninstall neither removes it nor mentions it. Once the fragment is gone, the scheme is gone too, and the name no longer matches any scheme. Windows Terminal then reports, when it starts, that a profile has an invalid `colorScheme`. On the maintainer's machine, after the uninstall of the acceptance test of 2026-10-14, it showed that error in a dialog when it was opened again, for the left-over Serena entry, which named Serena Dark Vivid (his report). It is expected to show it at every start until the name is taken out of the profile or sereno is applied again, which brings the six schemes back.
+
+To take the name out: in Windows Terminal's settings, open that profile, go to its Appearance page, use the reset button next to Color scheme, then Save. That way was not tried in the acceptance test. On the Serena entry, which the settings list as a profile that is no longer detected, never use the Delete button instead: if you delete the entry, a later reinstall stays hidden (the point above). A warning from `sereno uninstall` when your settings name a Serena scheme is planned for version 0.2.
 
 ### The program
 
@@ -126,6 +132,7 @@ Uninstall does not delete the sereno program; it prints where it is. If the inst
 
 - Theme files written with `sereno export --to DIR`. sereno keeps no record of them; they are yours.
 - Theme files you copied from sereno's `themes` folder into the folder of an emulator, and the line you added to that emulator's configuration.
+- A Serena colour scheme you chose for a profile in Windows Terminal's settings (see above).
 - Anything Windows Terminal, your shell or another program wrote on its own.
 
 ## The lock file
