@@ -6,6 +6,20 @@ It is `sereno`, one command without dependencies that makes the terminal you alr
 
 Leia em português: [README.pt-BR.md](README.pt-BR.md).
 
+![A Windows Terminal tab in Serena Dark Vivid: the Serena prompt and what sereno prints](docs/images/serena-dark-vivid.png)
+
+*Serena Dark Vivid, chosen in Windows Terminal's settings, as Windows Terminal 1.24.12741.0 draws it on the maintainer's machine, 2026-10-14.*
+
+![The same tab in a light Serena scheme](docs/images/serena-light.png)
+
+*Serena Light or Serena Light Vivid (the two have the same background and text colour), chosen in Windows Terminal's settings, as Windows Terminal 1.24.12741.0 draws it on the maintainer's machine, 2026-10-14.*
+
+![The same tab in Serena High Contrast Light](docs/images/serena-high-contrast-light.png)
+
+*Serena High Contrast Light, chosen in Windows Terminal's settings, as Windows Terminal 1.24.12741.0 draws it on the maintainer's machine, 2026-10-14.*
+
+The schemes were chosen there for the Serena profile, so these pictures show the schemes, not sereno following Windows. The tab holds the Serena prompt and what `sereno` prints without a command, in Portuguese; the pictures come from the acceptance test described under Status.
+
 ## Status
 
 <!-- sereno:status unreleased -->
@@ -22,7 +36,7 @@ What has been checked so far, and what has not:
 - **Reported by the maintainer, without a record:** that the open tab followed Windows to light and back, and through contrast themes (which themes, and what each showed, was not written down); that the six schemes are in Windows Terminal's settings; that VS Code's terminal, a tab of the stock Windows PowerShell profile and Windows PowerShell started from the Start menu were fine with the hook line; and what Windows Terminal showed after the uninstall.
 - **Not done yet:** the four exported theme formats were not checked in their emulators.
 
-Screenshots will be added to `docs/images` after that acceptance test; there are none yet.
+The pictures at the top of this page, in `docs/images`, are three of the screenshots of that acceptance test, cropped to the tab.
 
 ## What it writes, and where
 

@@ -6,6 +6,20 @@ Ele é o `sereno`, um único comando, sem dependências, que faz o terminal que 
 
 Read in English: [README.md](README.md).
 
+![Uma aba do Windows Terminal em Serena Dark Vivid: o prompt Serena e o que o sereno mostra](docs/images/serena-dark-vivid.png)
+
+*Serena Dark Vivid, escolhido nas configurações do Windows Terminal, como o Windows Terminal 1.24.12741.0 o desenha na máquina do mantenedor, em 2026-10-14.*
+
+![A mesma aba num esquema Serena claro](docs/images/serena-light.png)
+
+*Serena Light ou Serena Light Vivid (os dois têm a mesma cor de fundo e de texto), escolhido nas configurações do Windows Terminal, como o Windows Terminal 1.24.12741.0 o desenha na máquina do mantenedor, em 2026-10-14.*
+
+![A mesma aba em Serena High Contrast Light](docs/images/serena-high-contrast-light.png)
+
+*Serena High Contrast Light, escolhido nas configurações do Windows Terminal, como o Windows Terminal 1.24.12741.0 o desenha na máquina do mantenedor, em 2026-10-14.*
+
+Os esquemas foram escolhidos ali para o perfil Serena, então as imagens mostram os esquemas, não o sereno acompanhando o Windows. A aba traz o prompt Serena e o que o `sereno` mostra sem comando, em português; as imagens vêm do teste de aceitação descrito em Situação.
+
 ## Situação
 
 <!-- sereno:status unreleased -->
@@ -22,7 +36,7 @@ O que já foi conferido, e o que não foi:
 - **Relatado pelo mantenedor, sem registro:** que a aba aberta acompanhou o Windows para o claro e de volta, e pelos temas de contraste (quais temas, e o que cada um mostrou, não foi anotado); que os seis esquemas estão nas configurações do Windows Terminal; que o terminal do VS Code, uma aba do perfil padrão do Windows PowerShell e o Windows PowerShell aberto pelo menu Iniciar ficaram bem com a linha de hook; e o que o Windows Terminal mostrou depois do uninstall.
 - **Ainda não foi feito:** os quatro formatos de tema exportados não foram conferidos nos emuladores.
 
-As capturas de tela entram em `docs/images` depois desse teste de aceitação; por enquanto não há nenhuma.
+As imagens do começo desta página, em `docs/images`, são três das capturas de tela desse teste de aceitação, recortadas na aba.
 
 ## O que ele grava, e onde
 
