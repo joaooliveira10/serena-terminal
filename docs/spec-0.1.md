@@ -402,35 +402,24 @@ Each entry names the file, a few words of the sentence as it stands, and the poi
 
 The two READMEs, which say the same in two languages and change together:
 
-- `README.md` "Seen on a screen, one thing so far" and `README.pt-BR.md` "Visto numa tela, uma coisa até agora" wait for T12 as a whole: the item takes what the record says was seen, point by point.
-- `README.md` "the program has not been applied to a real user profile" and `README.pt-BR.md` "o programa não foi aplicado a um perfil de usuário de verdade" wait for T12 (1), (2), (3) and (4). The last sentence of that item, about the four exported theme formats, stays.
 - `README.md` "Screenshots will be added to" and `README.pt-BR.md` "As capturas de tela entram em" wait for the last sentence of T12, the three screenshots.
-- `README.md` "the open tab changes at its next prompt: press Enter" and `README.pt-BR.md` "a aba aberta muda no próximo prompt: aperte Enter" wait for T12 (3) and (4): the sentence is written as a fact, and those two points are its first observation.
-- `README.md` "The rest has not been looked at yet" and `README.pt-BR.md` "O resto ainda não foi conferido" wait for T12 (3) and (4), with the sentence in front of each about the one thing that was seen.
 - `README.md` "is expected to start dark for a moment", "it is then expected to choose the right scheme", "it is expected to do that when its settings are reloaded" and `README.pt-BR.md` "o esperado é que uma aba nova comece escura por um instante", "o esperado é que ele também escolha o esquema certo", "o esperado é que ele faça isso ao recarregar as configurações" wait for T12 (3), and only for what was seen on the way: T12 has no point for any of the three, so each stays unless the record says it was seen (a new Serena tab opened while Windows is light shows the first).
 - `README.md` "which sereno has not measured" and `README.pt-BR.md` "que o sereno não mediu" wait for T12 (6), the tab of the stock Windows PowerShell profile.
 - `README.md` "no such tab has been opened" and `README.pt-BR.md` "nenhuma aba assim foi aberta" wait for T12 (6), Windows PowerShell started from the Start menu: the whole point on Windows Terminal as the default terminal is worded from whether that was such a tab, whether it carried WT_SESSION and which background it named.
 - `README.md` "sereno never repaints there" and `README.pt-BR.md` "O sereno nunca repinta ali" wait for T12 (6), the terminal of VS Code.
 - `README.md` "None of this has been looked at on a screen" and `README.pt-BR.md` "Nada disso foi conferido numa tela" wait for T12 (6), and only if the Windows PowerShell started from the Start menu turns out to be the console window of Windows.
-- `README.md` "the acceptance test with a real profile is still to come" and `README.pt-BR.md` "o teste de aceitação com um perfil de verdade ainda está por fazer" wait for T12 as a whole.
 
 The other documents for readers:
 
-- `CHANGELOG.md` "nothing else has been confirmed on a screen" waits for T12 as a whole.
-- `docs/support-matrix.md` "this page describes the code as it stands on" waits for T12 as a whole: the day moves with what the page says then.
-- `docs/support-matrix.md` "he is to look at it on screen before a release" and "The rest of that check, and a first apply to a real user profile, are still to come." wait for T12 as a whole.
-- `docs/support-matrix.md` "Not looked at in Windows Terminal yet." waits for T12 (1) and (2).
 - `docs/support-matrix.md` "sereno does not repaint there. Not looked at." waits for T12 (6), the terminal of VS Code.
 - `docs/support-matrix.md` "neither case has been tried on a machine" waits for T12 (1), and only if the stored execution policy on the owner's machine is `Restricted`: a Serena tab that opens there with its prompt is the first trial of the first of the two cases. Point (1) does not ask for the stored policy, so the sentence stays unless the record names it; the second case, a policy set by Group Policy, stays untried.
 - `docs/support-matrix.md` "A Documents folder kept in OneDrive has not been tried." waits for T12 (6), and only if the owner's Documents folder is kept in OneDrive: the apply of that point then finds the profile there.
 - `docs/support-matrix.md` "no one has looked at it" waits for T12 (6), the tab of the stock Windows PowerShell profile.
-- `docs/support-matrix.md` "the profile and the colour schemes of the fragment have not been looked at in any version yet" waits for T12 (1) and (2).
 - `docs/support-matrix.md` "Read in the source code, not seen." waits for T12 (7), which shows what `sereno status` says of the theme setting on the owner's machine, and none of the other cases.
 - `docs/support-matrix.md` "This is read from its source code and computed from the palette, not seen on a screen." waits for T12 (4), which turns a contrast theme on in mode auto only.
 - `docs/support-matrix.md` "Naming the home folder is right under either reading. Not seen yet." waits for T12 (1), where a Serena tab starts.
 - `docs/support-matrix.md` "was open on 2026-10-13" and "Such a tab itself has not been opened." wait for T12 (6), Windows PowerShell started from the Start menu.
 - `docs/support-matrix.md` "no person has looked at such a window" waits for T12 (6), and only if the Windows PowerShell started from the Start menu turns out to be the console window of Windows.
-- `docs/how-it-works.md` "Of what is described here, one thing has been seen on a screen" waits for T12 as a whole.
 - `docs/how-it-works.md` "an assumption that has not been checked against real contrast themes yet" waits for T12 (4), with one dark and one light contrast theme.
 - `docs/adr/0003-in-band-palette.md` "The first frame of a new tab is the emulator's choice" waits for T12 (3), and only for what was seen on the way.
 - `docs/adr/0003-in-band-palette.md` "Still to be seen: in the acceptance test" waits for T12 (3) and (4).
