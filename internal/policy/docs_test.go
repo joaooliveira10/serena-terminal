@@ -37,8 +37,9 @@ func repositoryText(t *testing.T, name string) string {
 
 // documents lists the Markdown files written for readers: the two READMEs,
 // CHANGELOG.md, SECURITY.md and everything below docs, with forward slashes.
-// The specification is a working contract, not a document for users, and
-// docs/contrast.md is generated; both are left to their own tests.
+// The specifications are working contracts, not documents for users (that of
+// a version not yet built names commands and flags the program does not have
+// yet), and docs/contrast.md is generated; they are left to their own tests.
 func documents(t *testing.T) []string {
 	t.Helper()
 	root := testenv.RepoRoot(t)
@@ -51,7 +52,7 @@ func documents(t *testing.T) []string {
 		if err != nil {
 			return err
 		}
-		if name := filepath.ToSlash(rel); name != "docs/spec-0.1.md" && name != "docs/contrast.md" {
+		if name := filepath.ToSlash(rel); !specifications[name] && name != "docs/contrast.md" {
 			names = append(names, name)
 		}
 		return nil
@@ -122,6 +123,7 @@ func TestRepositoryLayout(t *testing.T) {
 	for _, name := range []string{
 		readmeEnglish, readmePortuguese, "LICENSE", "CHANGELOG.md", "SECURITY.md",
 		"docs/how-it-works.md", "docs/contrast.md", "docs/support-matrix.md", "docs/uninstall.md", "docs/privacy.md",
+		"docs/spec-0.2.md",
 		"docs/adr/0001-not-an-emulator.md", "docs/adr/0002-slots-not-hex.md", "docs/adr/0003-in-band-palette.md",
 		".github/workflows/ci.yml", ".github/workflows/release.yml", ".github/dependabot.yml",
 		"scripts/install.ps1.tmpl", "scripts/install.sh.tmpl", "scripts/release.sh",
@@ -411,6 +413,10 @@ func TestDocumentsNeverPipeADownloadIntoAShell(t *testing.T) {
 
 // specification is the working contract of version 0.1.
 const specification = "docs/spec-0.1.md"
+
+// specifications are the working contracts of the versions, the one of 0.1
+// and the one of 0.2, which continues it.
+var specifications = map[string]bool{specification: true, "docs/spec-0.2.md": true}
 
 // waitingForT12 heads the last section of the specification: the sentences
 // of the repository that are to change only after the acceptance test T12
